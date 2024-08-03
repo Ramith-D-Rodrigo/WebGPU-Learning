@@ -25,14 +25,36 @@ public:
 
 private:
     TextureView GetNextSurfaceTextureView();	// Get the next surface texture view
+    void InitializePipeline();	// Initialize the pipeline
 
 private:
-    GLFWwindow* window;
+    GLFWwindow* window = nullptr;
     Device device = nullptr;
     Queue queue = nullptr;
     Surface surface = nullptr;
-
+    TextureFormat surfaceFormat = TextureFormat::Undefined;
+    RenderPipeline renderPipeline = nullptr;
 };
+
+const char* shaderSource = R"(
+@vertex
+fn vs_main(@builtin(vertex_index) in_vertex_index: u32) -> @builtin(position) vec4f {
+    var p = vec2f(0.0, 0.0);
+    if (in_vertex_index == 0u) {
+        p = vec2f(-0.5, -0.5);
+    } else if (in_vertex_index == 1u) {
+        p = vec2f(0.5, -0.5);
+    } else {
+        p = vec2f(0.0, 0.5);
+    }
+    return vec4f(p, 0.0, 1.0);
+}
+
+@fragment
+fn fs_main() -> @location(0) vec4f {
+    return vec4f(0.0, 0.4, 1.0, 1.0);
+}
+)";
 
 int main() {
     Application app;
@@ -185,7 +207,7 @@ bool Application::Initialize()
     config.width = 800;
     config.height = 600;
 
-    TextureFormat surfaceFormat = this->surface.getPreferredFormat(adapter);
+    this->surfaceFormat = this->surface.getPreferredFormat(adapter);
     config.format = surfaceFormat;
 
     config.viewFormatCount = 0;
@@ -202,19 +224,25 @@ bool Application::Initialize()
     //release the adapter
     adapter.release();
 
+    //initialize the pipeline
+    this->InitializePipeline();
+
     return true;
 }
 
 void Application::Terminate()
 {
+    //release the pipeline
+    this->renderPipeline.release();
+
     //unconfigure the surface
     this->surface.unconfigure();
 
-    //release the surface
-    this->surface.release();
-
     //release queue
     this->queue.release();
+
+    //release the surface
+    this->surface.release();
 
     //release the device
     this->device.release();
@@ -253,12 +281,20 @@ void Application::MainLoop()
     renderPassColorAttachment.storeOp = StoreOp::Store;
     renderPassColorAttachment.clearValue = Color{ 0.5f, 0.8f, 0.0f, 1.0f }; //any value is fine
 
+    #ifndef WEBGPU_BACKEND_WGPU
     renderPassColorAttachment.depthSlice = WGPU_DEPTH_SLICE_UNDEFINED;  //because we do not use the depth buffer
+    #endif // NOT WEBGPU_BACKEND_WGPU
 
     renderPassDescriptor.colorAttachmentCount = 1;
     renderPassDescriptor.colorAttachments = &renderPassColorAttachment;
 
     RenderPassEncoder renderPass = encoder.beginRenderPass(renderPassDescriptor);
+
+    // Select which render pipeline to use
+    renderPass.setPipeline(this->renderPipeline);
+    // Draw 1 instance of a 3-vertices shape
+    renderPass.draw(3, 1, 0, 0);
+
     renderPass.end();
     renderPass.release();
 
@@ -290,6 +326,101 @@ void Application::MainLoop()
 bool Application::IsRunning()
 {
     return !glfwWindowShouldClose(this->window);
+}
+
+void Application::InitializePipeline()
+{
+    ShaderModuleDescriptor shaderModuleDescriptor = {};
+    #ifdef WEBGPU_BACKEND_WGPU
+        shaderModuleDescriptor.hintCount = 0;
+        shaderModuleDescriptor.hints = nullptr;
+    #endif
+
+    ShaderModuleWGSLDescriptor shaderModuleWGSLDescriptor = {};
+    shaderModuleWGSLDescriptor.chain.next = nullptr;
+    shaderModuleWGSLDescriptor.chain.sType = SType::ShaderModuleWGSLDescriptor;
+
+    shaderModuleDescriptor.nextInChain = &shaderModuleWGSLDescriptor.chain; //connect the chain
+    shaderModuleWGSLDescriptor.code = shaderSource;
+
+    ShaderModule shaderModule = this->device.createShaderModule(shaderModuleDescriptor);
+
+    //now create the pipeline
+    RenderPipelineDescriptor renderPipelineDescriptor = Default;
+    //vertex pipeline state
+
+    //currently we hard code the triangle vertices thus we do not need to create a buffer
+    renderPipelineDescriptor.vertex.bufferCount = 0;
+    renderPipelineDescriptor.vertex.buffers = nullptr;
+
+    renderPipelineDescriptor.vertex.module = shaderModule;
+    renderPipelineDescriptor.vertex.entryPoint = "vs_main"; //vertex shader main
+    renderPipelineDescriptor.vertex.constantCount = 0;
+    renderPipelineDescriptor.vertex.constants = nullptr;
+
+    //primitive pipeline state
+    // 
+    // Here we have to specify the type of primitives that will be drawn.
+    // 
+    // Each sequence of 3 vertices is considered as a triangle
+    renderPipelineDescriptor.primitive.topology = PrimitiveTopology::TriangleList;
+
+    // We'll see later how to specify the order in which vertices should be
+    // connected. When not specified, vertices are considered sequentially.
+    renderPipelineDescriptor.primitive.stripIndexFormat = IndexFormat::Undefined;
+
+    // The face orientation is defined by assuming that when looking
+    // from the front of the face, its corner vertices are enumerated
+    // in the counter-clockwise (CCW) order.
+    renderPipelineDescriptor.primitive.frontFace = FrontFace::CCW;
+
+    // But the face orientation does not matter much because we do not
+    // cull (i.e. "hide") the faces pointing away from us (which is often
+    // used for optimization).
+    renderPipelineDescriptor.primitive.cullMode = CullMode::None;
+
+    //fragment pipeline state (this is optional)
+    FragmentState fragmentState = {};
+    fragmentState.module = shaderModule;
+    fragmentState.entryPoint = "fs_main"; //fragment shader main
+    fragmentState.constantCount = 0;
+    fragmentState.constants = nullptr;
+
+    //stencil/depth pipeline state
+    renderPipelineDescriptor.depthStencil = nullptr;
+
+    //blend pipeline state
+    BlendState blendState = {};
+
+    blendState.color.srcFactor = BlendFactor::SrcAlpha;
+    blendState.color.dstFactor = BlendFactor::OneMinusSrcAlpha;
+    blendState.color.operation = BlendOperation::Add;
+
+    blendState.alpha.srcFactor = BlendFactor::Zero;
+    blendState.alpha.dstFactor = BlendFactor::One;
+    blendState.alpha.operation = BlendOperation::Add;
+
+    ColorTargetState colorTargetState = {};
+    colorTargetState.format = surfaceFormat;
+    colorTargetState.blend = &blendState;
+    colorTargetState.writeMask = ColorWriteMask::All;
+
+    fragmentState.targetCount = 1;  //we have only one output color for the render pass
+    fragmentState.targets = &colorTargetState;
+
+    renderPipelineDescriptor.fragment = &fragmentState;
+
+    //multisample pipeline state
+    renderPipelineDescriptor.multisample.count = 1;
+    renderPipelineDescriptor.multisample.mask = ~0u; //all bits are enabled
+    renderPipelineDescriptor.multisample.alphaToCoverageEnabled = false;
+
+    //pipeline layout
+    renderPipelineDescriptor.layout = nullptr; //access to resources is not needed
+
+    this->renderPipeline = this->device.createRenderPipeline(renderPipelineDescriptor);
+
+    shaderModule.release();
 }
 
 TextureView Application::GetNextSurfaceTextureView()
