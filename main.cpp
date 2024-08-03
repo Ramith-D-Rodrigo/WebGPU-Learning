@@ -1,9 +1,19 @@
-#include <iostream>
+// Include the C++ wrapper instead of the raw header(s)
+#define WEBGPU_CPP_IMPLEMENTATION
+#include <webgpu/webgpu.hpp>
+
 #include <GLFW/glfw3.h>
 #include <glfw3webgpu.h>
 
-#include "utils.h"
+#ifdef __EMSCRIPTEN__
+#  include <emscripten.h>
+#endif // __EMSCRIPTEN__
 
+#include <iostream>
+#include <cassert>
+#include <vector>
+
+using namespace wgpu;
 using namespace std;
 
 class Application {
@@ -14,13 +24,13 @@ public:
     bool IsRunning();	// Return true if the application is running
 
 private:
-    WGPUTextureView GetNextSurfaceTextureView();	// Get the next surface texture view
+    TextureView GetNextSurfaceTextureView();	// Get the next surface texture view
 
 private:
     GLFWwindow* window;
-    WGPUDevice device;
-    WGPUQueue queue;
-    WGPUSurface surface;
+    Device device = nullptr;
+    Queue queue = nullptr;
+    Surface surface = nullptr;
 
 };
 
@@ -49,7 +59,6 @@ int main() {
     
 }
 
-
 bool Application::Initialize()
 {
     if (!glfwInit()) {
@@ -68,15 +77,14 @@ bool Application::Initialize()
     }
 
     //get the descriptor
-    WGPUInstanceDescriptor descriptor = {};
-    descriptor.nextInChain = nullptr;
+    InstanceDescriptor descriptor = Default;
 
     #ifdef WEBGPU_BACKEND_DAWN
     // Make sure the uncaptured error callback is called as soon as an error
     // occurs rather than at the next call to "wgpuDeviceTick".
-    WGPUDawnTogglesDescriptor toggles;
+   DawnTogglesDescriptor toggles;
     toggles.chain.next = nullptr;
-    toggles.chain.sType = WGPUSType_DawnTogglesDescriptor;
+    toggles.chain.sType = SType::DawnTogglesDescriptor;
     toggles.disabledToggleCount = 0;
     toggles.enabledToggleCount = 1;
     const char* toggleName = "enable_immediate_error_handling";
@@ -87,9 +95,9 @@ bool Application::Initialize()
 
     //create the instance
     #ifdef WEBGPU_BACKEND_EMSCRIPTEN
-    WGPUInstance instance = wgpuCreateInstance(nullptr); // Emscripten doesn't support WGPUInstanceDescriptor
+    Instance instance = createInstance(nullptr); // Emscripten doesn't support WGPUInstanceDescriptor
     #else
-    WGPUInstance instance = wgpuCreateInstance(&descriptor);
+    Instance instance = createInstance(descriptor);
     #endif
 
     if (!instance) {
@@ -105,15 +113,16 @@ bool Application::Initialize()
 
     cout << "Requesting adapter synchronously" << endl;
 
-    WGPURequestAdapterOptions options = {};
+    RequestAdapterOptions options = {};
     options.nextInChain = nullptr;
-    options.powerPreference = WGPUPowerPreference_HighPerformance;
+    options.powerPreference = PowerPreference::HighPerformance;
     options.compatibleSurface = this->surface;
 
-    WGPUAdapter adapter = requestAdapterSync(instance, &options);
+    //Adapter adapter = requestAdapterSync(instance, &options); we do not need to use this function as we can use the following function
+    Adapter adapter = instance.requestAdapter(options);
 
     //release the instance
-    wgpuInstanceRelease(instance);
+    instance.release();
 
     if (!adapter) {
         cout << "Failed to get the adapter" << endl;
@@ -122,32 +131,34 @@ bool Application::Initialize()
     }
     cout << "Adapter obtained successfully and adapter is " << adapter << endl;
 
-    inspectAdapter(adapter);
+    //inspectAdapter(adapter);
 
     cout << "Requesting device synchronously" << endl;
 
-    WGPUDeviceDescriptor deviceDescriptor = {};
+    DeviceDescriptor deviceDescriptor = {};
     deviceDescriptor.nextInChain = nullptr;
     deviceDescriptor.label = "My Device"; // anything works here, that's your call
     deviceDescriptor.requiredFeatureCount = 0; // we do not require any specific feature
     deviceDescriptor.requiredLimits = nullptr; // we do not require any specific limit
     deviceDescriptor.defaultQueue.nextInChain = nullptr;
     deviceDescriptor.defaultQueue.label = "The default queue";
-    deviceDescriptor.deviceLostCallback = // A function that is invoked whenever the device stops being available.
-        [](WGPUDeviceLostReason reason, char const* message, void* /* pUserData */) {
+
+    auto onDeviceLost = [](WGPUDeviceLostReason reason, char const * message, void* /* pUserData */) {
         cout << "Device lost: reason " << reason;
         if (message) cout << " (" << message << ")";
         cout << endl;
         };
 
-    this->device = requestDeviceSync(adapter, &deviceDescriptor);
+    deviceDescriptor.deviceLostCallback = onDeviceLost;// A function that is invoked whenever the device stops being available.
+    //this->device = requestDeviceSync(adapter, &deviceDescriptor); we do not need to use this function as we can use the following function
+    this->device = adapter.requestDevice(deviceDescriptor);
 
-    auto onDeviceError = [](WGPUErrorType type, char const* message, void* /* pUserData */) {
+    auto onDeviceError = [](ErrorType type, char const* message) {
         cout << "Uncaptured device error: type " << type;
         if (message) cout << " (" << message << ")";
         cout << endl;
         };
-    wgpuDeviceSetUncapturedErrorCallback(this->device, onDeviceError, nullptr /* pUserData */);
+    this->device.setUncapturedErrorCallback(onDeviceError);
 
     if (!this->device) {
         cout << "Failed to get the device" << endl;
@@ -157,38 +168,39 @@ bool Application::Initialize()
 
     cout << "Device obtained successfully and device is " << this->device << endl;
 
-    inspectDevice(this->device);
+    //inspectDevice(this->device);
 
     //create queue to pass commands to the device
-    this->queue = wgpuDeviceGetQueue(this->device);
+    this->queue = this->device.getQueue();
 
-    auto onQueueWorkDone = [](WGPUQueueWorkDoneStatus status, void* /* pUserData */) {
-        cout << "Queued work finished with status: " << status << endl;
-        };
-    wgpuQueueOnSubmittedWorkDone(this->queue, onQueueWorkDone, nullptr /* pUserData */);
+    //auto onQueueWorkDone = [](WGPUQueueWorkDoneStatus status, void* /* pUserData */) {
+    //    cout << "Queued work finished with status: " << status << endl;
+    //    };
+
+    //wgpuQueueOnSubmittedWorkDone(this->queue, onQueueWorkDone, nullptr /* pUserData */);
 
     //configure the surface
-    WGPUSurfaceConfiguration config = {};
+    SurfaceConfiguration config = {};
     config.nextInChain = nullptr;
     config.width = 800;
     config.height = 600;
 
-    WGPUTextureFormat surfaceFormat = wgpuSurfaceGetPreferredFormat(this->surface, adapter);
+    TextureFormat surfaceFormat = this->surface.getPreferredFormat(adapter);
     config.format = surfaceFormat;
 
     config.viewFormatCount = 0;
     config.viewFormats = nullptr;
 
-    config.usage = WGPUTextureUsage_RenderAttachment;
+    config.usage = TextureUsage::RenderAttachment;
     config.device = this->device;
 
-    config.presentMode = WGPUPresentMode_Fifo;
-    config.alphaMode = WGPUCompositeAlphaMode_Auto;
+    config.presentMode = PresentMode::Fifo;
+    config.alphaMode = CompositeAlphaMode::Auto;
 
-    wgpuSurfaceConfigure(this->surface, &config);
+    this->surface.configure(config);
 
     //release the adapter
-    wgpuAdapterRelease(adapter);
+    adapter.release();
 
     return true;
 }
@@ -196,16 +208,16 @@ bool Application::Initialize()
 void Application::Terminate()
 {
     //unconfigure the surface
-    wgpuSurfaceUnconfigure(this->surface);
+    this->surface.unconfigure();
 
     //release the surface
-    wgpuSurfaceRelease(this->surface);
+    this->surface.release();
 
     //release queue
-    wgpuQueueRelease(this->queue);
+    this->queue.release();
 
     //release the device
-    wgpuDeviceRelease(this->device);
+    this->device.release();
 
     //destroy the window
     glfwDestroyWindow(this->window);
@@ -215,61 +227,61 @@ void Application::Terminate()
 
 void Application::MainLoop()
 {
-    WGPUTextureView targetView = this->GetNextSurfaceTextureView();
+    TextureView targetView = this->GetNextSurfaceTextureView();
     if (!targetView) {
         return;
     }
 
     glfwPollEvents();
 
-    WGPUCommandEncoderDescriptor commandEncoderDescriptor = {};
+    CommandEncoderDescriptor commandEncoderDescriptor = {};
     commandEncoderDescriptor.nextInChain = nullptr;
     commandEncoderDescriptor.label = "Command Encoder";
 
-    WGPUCommandEncoder encoder = wgpuDeviceCreateCommandEncoder(this->device, &commandEncoderDescriptor);
+    CommandEncoder encoder = this->device.createCommandEncoder(commandEncoderDescriptor);
 
-    WGPURenderPassDescriptor renderPassDescriptor = {};
+    RenderPassDescriptor renderPassDescriptor = {};
     renderPassDescriptor.nextInChain = nullptr;
     renderPassDescriptor.depthStencilAttachment = nullptr;
     renderPassDescriptor.timestampWrites = nullptr; //do not measure the time
 
-    WGPURenderPassColorAttachment renderPassColorAttachment = {};
+    RenderPassColorAttachment renderPassColorAttachment = {};
     renderPassColorAttachment.view = targetView;
     renderPassColorAttachment.resolveTarget = nullptr;
 
-    renderPassColorAttachment.loadOp = WGPULoadOp_Clear;
-    renderPassColorAttachment.storeOp = WGPUStoreOp_Store;
-    renderPassColorAttachment.clearValue = WGPUColor{ 0.5f, 0.8f, 0.0f, 1.0f }; //any value is fine
+    renderPassColorAttachment.loadOp = LoadOp::Clear;
+    renderPassColorAttachment.storeOp = StoreOp::Store;
+    renderPassColorAttachment.clearValue = Color{ 0.5f, 0.8f, 0.0f, 1.0f }; //any value is fine
 
     renderPassColorAttachment.depthSlice = WGPU_DEPTH_SLICE_UNDEFINED;  //because we do not use the depth buffer
 
     renderPassDescriptor.colorAttachmentCount = 1;
     renderPassDescriptor.colorAttachments = &renderPassColorAttachment;
 
-    WGPURenderPassEncoder renderPass = wgpuCommandEncoderBeginRenderPass(encoder, &renderPassDescriptor);
-    wgpuRenderPassEncoderEnd(renderPass);
-    wgpuRenderPassEncoderRelease(renderPass);
+    RenderPassEncoder renderPass = encoder.beginRenderPass(renderPassDescriptor);
+    renderPass.end();
+    renderPass.release();
 
     //encode and submit the render pass commands
-    WGPUCommandBufferDescriptor commandBufferDescriptor = {};
+    CommandBufferDescriptor commandBufferDescriptor = {};
     commandBufferDescriptor.nextInChain = nullptr;
     commandBufferDescriptor.label = "Command Buffer";
-    WGPUCommandBuffer commandBuffer = wgpuCommandEncoderFinish(encoder, &commandBufferDescriptor);
+    CommandBuffer commandBuffer = encoder.finish(commandBufferDescriptor);
 
     cout<<"Submitting the command buffer"<<endl;
-    wgpuQueueSubmit(this->queue, 1, &commandBuffer);
-    wgpuCommandBufferRelease(commandBuffer);
+    this->queue.submit(1, &commandBuffer);
+    commandBuffer.release();
 
     //release the texture view
-    wgpuTextureViewRelease(targetView);
+    targetView.release();
 
     //present the surface
     #ifndef __EMSCRIPTEN__
-        wgpuSurfacePresent(this->surface);
+        this->surface.present();
     #endif // !__EMSCRIPTEN__
 
     #if defined(WEBGPU_BACKEND_DAWN)
-            wgpuDeviceTick(device);
+            this->device.tick();
     #elif defined(WEBGPU_BACKEND_WGPU)
             wgpuDevicePoll(device, false, nullptr);
     #endif
@@ -280,26 +292,29 @@ bool Application::IsRunning()
     return !glfwWindowShouldClose(this->window);
 }
 
-WGPUTextureView Application::GetNextSurfaceTextureView()
+TextureView Application::GetNextSurfaceTextureView()
 {
-    WGPUSurfaceTexture surfaceTexture;
-    wgpuSurfaceGetCurrentTexture(this->surface, &surfaceTexture);
+    SurfaceTexture surfaceTexture;
+    this->surface.getCurrentTexture(&surfaceTexture);
 
-    if (surfaceTexture.status != WGPUSurfaceGetCurrentTextureStatus_Success) {
+    if (surfaceTexture.status != SurfaceGetCurrentTextureStatus::Success) {
         return nullptr;
     }
 
-    WGPUTextureViewDescriptor viewDescriptor;
+    Texture texture = surfaceTexture.texture;
+
+    TextureViewDescriptor viewDescriptor;
     viewDescriptor.nextInChain = nullptr;
     viewDescriptor.label = "Surface texture view";
-    viewDescriptor.format = wgpuTextureGetFormat(surfaceTexture.texture);
-    viewDescriptor.dimension = WGPUTextureViewDimension_2D;
+    viewDescriptor.format = texture.getFormat();
+    viewDescriptor.dimension = TextureViewDimension::_2D;
     viewDescriptor.baseMipLevel = 0;
     viewDescriptor.mipLevelCount = 1;
     viewDescriptor.baseArrayLayer = 0;
     viewDescriptor.arrayLayerCount = 1;
-    viewDescriptor.aspect = WGPUTextureAspect_All;
-    WGPUTextureView targetView = wgpuTextureCreateView(surfaceTexture.texture, &viewDescriptor);
+    viewDescriptor.aspect = TextureAspect::All;
+
+    TextureView targetView = texture.createView(viewDescriptor);
 
     return targetView;
 }
