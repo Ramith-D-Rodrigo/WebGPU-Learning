@@ -16,6 +16,19 @@
 using namespace wgpu;
 using namespace std;
 
+// We define a function that hides implementation-specific variants of device polling:
+void wgpuPollEvents([[maybe_unused]] Device device, [[maybe_unused]] bool yieldToWebBrowser) {
+#if defined(WEBGPU_BACKEND_DAWN)
+    device.tick();
+#elif defined(WEBGPU_BACKEND_WGPU)
+    device.poll(false);
+#elif defined(WEBGPU_BACKEND_EMSCRIPTEN)
+    if (yieldToWebBrowser) {
+        emscripten_sleep(100);
+    }
+#endif
+}
+
 class Application {
 public:
     bool Initialize();	// Initialize the application and return true if successful
@@ -104,7 +117,7 @@ bool Application::Initialize()
     #ifdef WEBGPU_BACKEND_DAWN
     // Make sure the uncaptured error callback is called as soon as an error
     // occurs rather than at the next call to "wgpuDeviceTick".
-   DawnTogglesDescriptor toggles;
+    DawnTogglesDescriptor toggles;
     toggles.chain.next = nullptr;
     toggles.chain.sType = SType::DawnTogglesDescriptor;
     toggles.disabledToggleCount = 0;
@@ -165,13 +178,18 @@ bool Application::Initialize()
     deviceDescriptor.defaultQueue.nextInChain = nullptr;
     deviceDescriptor.defaultQueue.label = "The default queue";
 
-    auto onDeviceLost = [](WGPUDeviceLostReason reason, char const * message, void* /* pUserData */) {
+    auto onDeviceLost = [](WGPUDevice const */*device*/, WGPUDeviceLostReason reason, char const * message, void* /* pUserData */) {
         cout << "Device lost: reason " << reason;
         if (message) cout << " (" << message << ")";
         cout << endl;
         };
 
-    deviceDescriptor.deviceLostCallback = onDeviceLost;// A function that is invoked whenever the device stops being available.
+    DeviceLostCallbackInfo deviceLostCallbackInfo = {};
+    deviceLostCallbackInfo.callback = onDeviceLost;
+    deviceLostCallbackInfo.mode = CallbackMode::AllowProcessEvents;
+
+    deviceDescriptor.deviceLostCallbackInfo = deviceLostCallbackInfo;
+   // deviceDescriptor.deviceLostCallback = onDeviceLost;// A function that is invoked whenever the device stops being available. (DEPRECATED)
     //this->device = requestDeviceSync(adapter, &deviceDescriptor); we do not need to use this function as we can use the following function
     this->device = adapter.requestDevice(deviceDescriptor);
 
@@ -226,6 +244,88 @@ bool Application::Initialize()
 
     //initialize the pipeline
     this->InitializePipeline();
+
+    //Experimenting with the buffers
+
+    //create the first buffer
+    const int BUFFER_SIZE = 16;
+
+    BufferDescriptor bufferDescriptor = {};
+    bufferDescriptor.label = "Buffer 1";
+    bufferDescriptor.usage = BufferUsage::CopyDst | BufferUsage::CopySrc;   //we will copy data to and from this buffer
+    bufferDescriptor.size = BUFFER_SIZE;
+    bufferDescriptor.mappedAtCreation = false;
+
+    Buffer buffer1 = this->device.createBuffer(bufferDescriptor);
+
+    //create the second buffer
+    bufferDescriptor.label = "Buffer 2";
+    bufferDescriptor.usage = BufferUsage::CopyDst | BufferUsage::MapRead; //mapped for reading
+
+    Buffer buffer2 = this->device.createBuffer(bufferDescriptor);
+
+    //write input data
+    //create an array for example
+    vector<uint8_t> data(BUFFER_SIZE);
+    for (size_t i = 0; i < data.size(); i++) {
+		data[i] = static_cast<uint8_t>(i);
+	}
+
+    this->queue.writeBuffer(buffer1, 0, data.data(), BUFFER_SIZE); //copying data from RAM to VRAM
+
+    //encode and submit the buffer to buffer copy commands
+    CommandEncoder encoder = this->device.createCommandEncoder(Default);
+    encoder.copyBufferToBuffer(buffer1, 0, buffer2, 0, BUFFER_SIZE);
+    CommandBuffer commandBuffer = encoder.finish(Default);
+    encoder.release();
+    this->queue.submit(1, &commandBuffer);
+    commandBuffer.release();
+
+    //read the buffer data back
+
+    struct Context {
+        bool ready;
+        Buffer buffer;
+        int bufferSize;
+    };
+
+    auto onBuffer2Mapped = [](WGPUBufferMapAsyncStatus status, void* userData) { // callback function to be called when the buffer is mapped
+        //re interpret the user data to bool
+        Context* context = reinterpret_cast<Context*>(userData);
+        context->ready = true;
+
+        cout << "Buffer 2 mapped with status: " << status << endl;
+        if(status != WGPUBufferMapAsyncStatus_Success) {
+			cout << "Buffer 2 mapping failed" << endl;
+			return;
+		}
+        //read the buffer data
+        uint8_t* data = (uint8_t*)(context->buffer.getConstMappedRange(0, context->bufferSize));
+        //we are using const mapped range because we are not going to modify the data (because we have set the buffer usage to MapRead)
+        //we can use mapped range if the buffer usage is set to MapWrite
+
+        //print the data
+        cout << "Buffer 2 data: ";
+        for (size_t i = 0; i < context->bufferSize; i++) {
+            cout << static_cast<int>(data[i]) << " ";
+        }
+
+        //unmap the buffer
+        context->buffer.unmap();
+    };
+
+    Context context = { false, buffer2, BUFFER_SIZE };
+
+    wgpuBufferMapAsync(buffer2, MapMode::Read, 0, BUFFER_SIZE, onBuffer2Mapped, (void*)&context);
+
+
+    while (!context.ready) {
+		wgpuPollEvents(this->device, true);
+	}
+    
+    //release the buffers
+    buffer1.release();
+    buffer2.release();
 
     return true;
 }
