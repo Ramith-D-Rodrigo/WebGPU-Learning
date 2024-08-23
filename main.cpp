@@ -39,6 +39,9 @@ public:
 private:
     TextureView GetNextSurfaceTextureView();	// Get the next surface texture view
     void InitializePipeline();	// Initialize the pipeline
+    void PlayWithBuffers();	// Play with buffers
+    RequiredLimits GetRequiredLimits(Adapter adapter);	// Get the required limits
+    void InitializeBuffers();
 
 private:
     GLFWwindow* window = nullptr;
@@ -47,20 +50,14 @@ private:
     Surface surface = nullptr;
     TextureFormat surfaceFormat = TextureFormat::Undefined;
     RenderPipeline renderPipeline = nullptr;
+    Buffer vertexBuffer = nullptr;
+    uint32_t vertexCount = 0;
 };
 
 const char* shaderSource = R"(
 @vertex
-fn vs_main(@builtin(vertex_index) in_vertex_index: u32) -> @builtin(position) vec4f {
-    var p = vec2f(0.0, 0.0);
-    if (in_vertex_index == 0u) {
-        p = vec2f(-0.5, -0.5);
-    } else if (in_vertex_index == 1u) {
-        p = vec2f(0.5, -0.5);
-    } else {
-        p = vec2f(0.0, 0.5);
-    }
-    return vec4f(p, 0.0, 1.0);
+fn vs_main(@location(0) in_vertex_position: vec2f) -> @builtin(position) vec4f {
+    return vec4f(in_vertex_position, 0.0, 1.0);
 }
 
 @fragment
@@ -190,22 +187,25 @@ bool Application::Initialize()
 
     deviceDescriptor.deviceLostCallbackInfo = deviceLostCallbackInfo;
    // deviceDescriptor.deviceLostCallback = onDeviceLost;// A function that is invoked whenever the device stops being available. (DEPRECATED)
+   
+    RequiredLimits requiredLimits = GetRequiredLimits(adapter);
+    deviceDescriptor.requiredLimits = &requiredLimits;
+
     //this->device = requestDeviceSync(adapter, &deviceDescriptor); we do not need to use this function as we can use the following function
     this->device = adapter.requestDevice(deviceDescriptor);
-
-    auto onDeviceError = [](ErrorType type, char const* message) {
-        cout << "Uncaptured device error: type " << type;
-        if (message) cout << " (" << message << ")";
-        cout << endl;
-        };
-    this->device.setUncapturedErrorCallback(onDeviceError);
 
     if (!this->device) {
         cout << "Failed to get the device" << endl;
         glfwDestroyWindow(this->window);
         return false;
     }
+    auto onDeviceError = [](ErrorType type, char const* message) {
+        cout << "Uncaptured device error: type " << type;
+        if (message) cout << " (" << message << ")";
+        cout << endl;
+        };
 
+    this->device.setUncapturedErrorCallback(onDeviceError);
     cout << "Device obtained successfully and device is " << this->device << endl;
 
     //inspectDevice(this->device);
@@ -246,92 +246,15 @@ bool Application::Initialize()
     this->InitializePipeline();
 
     //Experimenting with the buffers
-
-    //create the first buffer
-    const int BUFFER_SIZE = 16;
-
-    BufferDescriptor bufferDescriptor = {};
-    bufferDescriptor.label = "Buffer 1";
-    bufferDescriptor.usage = BufferUsage::CopyDst | BufferUsage::CopySrc;   //we will copy data to and from this buffer
-    bufferDescriptor.size = BUFFER_SIZE;
-    bufferDescriptor.mappedAtCreation = false;
-
-    Buffer buffer1 = this->device.createBuffer(bufferDescriptor);
-
-    //create the second buffer
-    bufferDescriptor.label = "Buffer 2";
-    bufferDescriptor.usage = BufferUsage::CopyDst | BufferUsage::MapRead; //mapped for reading
-
-    Buffer buffer2 = this->device.createBuffer(bufferDescriptor);
-
-    //write input data
-    //create an array for example
-    vector<uint8_t> data(BUFFER_SIZE);
-    for (size_t i = 0; i < data.size(); i++) {
-		data[i] = static_cast<uint8_t>(i);
-	}
-
-    this->queue.writeBuffer(buffer1, 0, data.data(), BUFFER_SIZE); //copying data from RAM to VRAM
-
-    //encode and submit the buffer to buffer copy commands
-    CommandEncoder encoder = this->device.createCommandEncoder(Default);
-    encoder.copyBufferToBuffer(buffer1, 0, buffer2, 0, BUFFER_SIZE);
-    CommandBuffer commandBuffer = encoder.finish(Default);
-    encoder.release();
-    this->queue.submit(1, &commandBuffer);
-    commandBuffer.release();
-
-    //read the buffer data back
-
-    struct Context {
-        bool ready;
-        Buffer buffer;
-        int bufferSize;
-    };
-
-    auto onBuffer2Mapped = [](WGPUBufferMapAsyncStatus status, void* userData) { // callback function to be called when the buffer is mapped
-        //re interpret the user data to bool
-        Context* context = reinterpret_cast<Context*>(userData);
-        context->ready = true;
-
-        cout << "Buffer 2 mapped with status: " << status << endl;
-        if(status != WGPUBufferMapAsyncStatus_Success) {
-			cout << "Buffer 2 mapping failed" << endl;
-			return;
-		}
-        //read the buffer data
-        uint8_t* data = (uint8_t*)(context->buffer.getConstMappedRange(0, context->bufferSize));
-        //we are using const mapped range because we are not going to modify the data (because we have set the buffer usage to MapRead)
-        //we can use mapped range if the buffer usage is set to MapWrite
-
-        //print the data
-        cout << "Buffer 2 data: ";
-        for (size_t i = 0; i < context->bufferSize; i++) {
-            cout << static_cast<int>(data[i]) << " ";
-        }
-
-        //unmap the buffer
-        context->buffer.unmap();
-    };
-
-    Context context = { false, buffer2, BUFFER_SIZE };
-
-    wgpuBufferMapAsync(buffer2, MapMode::Read, 0, BUFFER_SIZE, onBuffer2Mapped, (void*)&context);
-
-
-    while (!context.ready) {
-		wgpuPollEvents(this->device, true);
-	}
-    
-    //release the buffers
-    buffer1.release();
-    buffer2.release();
+    //this->PlayWithBuffers();
+    this->InitializeBuffers();
 
     return true;
 }
 
 void Application::Terminate()
 {
+    this->vertexBuffer.release();
     //release the pipeline
     this->renderPipeline.release();
 
@@ -392,8 +315,9 @@ void Application::MainLoop()
 
     // Select which render pipeline to use
     renderPass.setPipeline(this->renderPipeline);
+    renderPass.setVertexBuffer(0, this->vertexBuffer, 0, this->vertexBuffer.getSize());
     // Draw 1 instance of a 3-vertices shape
-    renderPass.draw(3, 1, 0, 0);
+    renderPass.draw(this->vertexCount, 1, 0, 0);
 
     renderPass.end();
     renderPass.release();
@@ -404,7 +328,7 @@ void Application::MainLoop()
     commandBufferDescriptor.label = "Command Buffer";
     CommandBuffer commandBuffer = encoder.finish(commandBufferDescriptor);
 
-    cout<<"Submitting the command buffer"<<endl;
+    //cout<<"Submitting the command buffer"<<endl;
     this->queue.submit(1, &commandBuffer);
     commandBuffer.release();
 
@@ -447,11 +371,24 @@ void Application::InitializePipeline()
 
     //now create the pipeline
     RenderPipelineDescriptor renderPipelineDescriptor = Default;
+
     //vertex pipeline state
 
-    //currently we hard code the triangle vertices thus we do not need to create a buffer
-    renderPipelineDescriptor.vertex.bufferCount = 0;
-    renderPipelineDescriptor.vertex.buffers = nullptr;
+    VertexBufferLayout vertexBufferLayout;
+    VertexAttribute positionAttribute;
+
+    positionAttribute.format = VertexFormat::Float32x2; //2D vertices
+    positionAttribute.offset = 0;
+    positionAttribute.shaderLocation = 0; //location in the shader
+
+    vertexBufferLayout.attributeCount = 1; //only one attribute
+    vertexBufferLayout.attributes = &positionAttribute;
+    vertexBufferLayout.stepMode = VertexStepMode::Vertex; //each vertex is a separate entity (not instanced)
+    vertexBufferLayout.arrayStride = 2 * sizeof(float); //2 consecutive floats
+
+    renderPipelineDescriptor.vertex.bufferCount = 1;
+    renderPipelineDescriptor.vertex.buffers = &vertexBufferLayout;
+
 
     renderPipelineDescriptor.vertex.module = shaderModule;
     renderPipelineDescriptor.vertex.entryPoint = "vs_main"; //vertex shader main
@@ -548,4 +485,127 @@ TextureView Application::GetNextSurfaceTextureView()
     TextureView targetView = texture.createView(viewDescriptor);
 
     return targetView;
+}
+
+void Application::PlayWithBuffers() {
+    //create the first buffer
+    const int BUFFER_SIZE = 16;
+
+    BufferDescriptor bufferDescriptor = {};
+    bufferDescriptor.label = "Buffer 1";
+    bufferDescriptor.usage = BufferUsage::CopyDst | BufferUsage::CopySrc;   //we will copy data to and from this buffer
+    bufferDescriptor.size = BUFFER_SIZE;
+    bufferDescriptor.mappedAtCreation = false;
+
+    Buffer buffer1 = this->device.createBuffer(bufferDescriptor);
+
+    //create the second buffer
+    bufferDescriptor.label = "Buffer 2";
+    bufferDescriptor.usage = BufferUsage::CopyDst | BufferUsage::MapRead; //mapped for reading
+
+    Buffer buffer2 = this->device.createBuffer(bufferDescriptor);
+
+    //write input data
+    //create an array for example
+    vector<uint8_t> data(BUFFER_SIZE);
+    for (size_t i = 0; i < data.size(); i++) {
+        data[i] = static_cast<uint8_t>(i);
+    }
+
+    this->queue.writeBuffer(buffer1, 0, data.data(), BUFFER_SIZE); //copying data from RAM to VRAM
+
+    //encode and submit the buffer to buffer copy commands
+    CommandEncoder encoder = this->device.createCommandEncoder(Default);
+    encoder.copyBufferToBuffer(buffer1, 0, buffer2, 0, BUFFER_SIZE);
+    CommandBuffer commandBuffer = encoder.finish(Default);
+    encoder.release();
+    this->queue.submit(1, &commandBuffer);
+    commandBuffer.release();
+
+    //read the buffer data back
+
+    struct Context {
+        bool ready;
+        Buffer buffer;
+        int bufferSize;
+    };
+
+    auto onBuffer2Mapped = [](WGPUBufferMapAsyncStatus status, void* userData) { // callback function to be called when the buffer is mapped
+        //re interpret the user data to bool
+        Context* context = reinterpret_cast<Context*>(userData);
+        context->ready = true;
+
+        cout << "Buffer 2 mapped with status: " << status << endl;
+        if (status != WGPUBufferMapAsyncStatus_Success) {
+            cout << "Buffer 2 mapping failed" << endl;
+            return;
+        }
+        //read the buffer data
+        uint8_t* data = (uint8_t*)(context->buffer.getConstMappedRange(0, context->bufferSize));
+        //we are using const mapped range because we are not going to modify the data (because we have set the buffer usage to MapRead)
+        //we can use mapped range if the buffer usage is set to MapWrite
+
+        //print the data
+        cout << "Buffer 2 data: ";
+        for (size_t i = 0; i < context->bufferSize; i++) {
+            cout << static_cast<int>(data[i]) << " ";
+        }
+
+        //unmap the buffer
+        context->buffer.unmap();
+        };
+
+    Context context = { false, buffer2, BUFFER_SIZE };
+
+    wgpuBufferMapAsync(buffer2, MapMode::Read, 0, BUFFER_SIZE, onBuffer2Mapped, (void*)&context);
+
+
+    while (!context.ready) {
+        wgpuPollEvents(this->device, true);
+    }
+
+    //release the buffers
+    buffer1.release();
+    buffer2.release();
+}
+
+RequiredLimits Application::GetRequiredLimits(Adapter adapter)
+{
+    //first get the adapter supported limits
+    SupportedLimits supportedLimits;
+    adapter.getLimits(&supportedLimits);
+
+    RequiredLimits requiredLimits = Default;
+
+    //set the required limits
+    requiredLimits.limits.maxVertexAttributes = 1; //for now 1
+    requiredLimits.limits.maxVertexBuffers = 1; //for now 1
+    requiredLimits.limits.maxBufferSize = 6 * 2 * sizeof(float); //2D vertices
+    requiredLimits.limits.maxVertexBufferArrayStride = 2 * sizeof(float); //2 consecutive floats
+
+    return requiredLimits;
+}
+
+void Application::InitializeBuffers()
+{
+    vector<float> vertices = {
+		-0.5f, -0.5f,
+		0.0f, 0.5f,
+		0.5f, -0.5f,
+
+        -0.5f, 0.5f,
+        0.0f, -0.5f,
+        0.5f, 0.5f
+	};
+
+    this->vertexCount = static_cast<uint32_t>(vertices.size() / 2);
+
+    BufferDescriptor bufferDescriptor = {};
+    bufferDescriptor.label = "Vertex Buffer";
+    bufferDescriptor.size = vertices.size() * sizeof(float);
+    bufferDescriptor.usage = BufferUsage::Vertex | BufferUsage::CopyDst; //must add vertex usage
+    bufferDescriptor.mappedAtCreation = false;
+    this->vertexBuffer = this->device.createBuffer(bufferDescriptor);
+
+    this->queue.writeBuffer(this->vertexBuffer, 0, vertices.data(), bufferDescriptor.size);
 }
