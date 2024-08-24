@@ -55,14 +55,32 @@ private:
 };
 
 const char* shaderSource = R"(
+
+struct VertexInput {
+    @location(0) position: vec2f,
+    @location(1) color: vec3f,
+}
+
+struct VertexOutput {
+    @builtin(position) position: vec4f,
+    // The location here does not refer to a vertex attribute, it just means
+    // that this field must be handled by the rasterizer.
+    // (It can also refer to another field of another struct that would be used
+    // as input to the fragment shader.)
+    @location(0) color: vec3f,
+}
+
 @vertex
-fn vs_main(@location(0) in_vertex_position: vec2f) -> @builtin(position) vec4f {
-    return vec4f(in_vertex_position, 0.0, 1.0);
+fn vs_main(in: VertexInput) -> VertexOutput {
+    var out: VertexOutput;
+    out.position = vec4f(in.position, 0.0, 1.0);
+    out.color = in.color;
+    return out;
 }
 
 @fragment
-fn fs_main() -> @location(0) vec4f {
-    return vec4f(0.0, 0.4, 1.0, 1.0);
+fn fs_main(in: VertexOutput) -> @location(0) vec4f {
+    return vec4f(in.color, 1.0);
 }
 )";
 
@@ -302,7 +320,7 @@ void Application::MainLoop()
 
     renderPassColorAttachment.loadOp = LoadOp::Clear;
     renderPassColorAttachment.storeOp = StoreOp::Store;
-    renderPassColorAttachment.clearValue = Color{ 0.5f, 0.8f, 0.0f, 1.0f }; //any value is fine
+    renderPassColorAttachment.clearValue = Color{ 0.05f, 0.05f, 0.05f, 1.0f }; //any value is fine
 
     #ifndef WEBGPU_BACKEND_WGPU
     renderPassColorAttachment.depthSlice = WGPU_DEPTH_SLICE_UNDEFINED;  //because we do not use the depth buffer
@@ -375,16 +393,20 @@ void Application::InitializePipeline()
     //vertex pipeline state
 
     VertexBufferLayout vertexBufferLayout;
-    VertexAttribute positionAttribute;
+    vector<VertexAttribute> vertexAttributes(2);
 
-    positionAttribute.format = VertexFormat::Float32x2; //2D vertices
-    positionAttribute.offset = 0;
-    positionAttribute.shaderLocation = 0; //location in the shader
+    vertexAttributes[0].format = VertexFormat::Float32x2; //2D vertices
+    vertexAttributes[0].offset = 0;
+    vertexAttributes[0].shaderLocation = 0; //location in the shader (@location(0))
 
-    vertexBufferLayout.attributeCount = 1; //only one attribute
-    vertexBufferLayout.attributes = &positionAttribute;
+    vertexAttributes[1].format = VertexFormat::Float32x3; //RGB color
+    vertexAttributes[1].offset = 2 * sizeof(float); //2 floats for the position (non null offset)
+    vertexAttributes[1].shaderLocation = 1; //location in the shader (@location(1))
+
+    vertexBufferLayout.attributeCount = static_cast<uint32_t>(vertexAttributes.size());
+    vertexBufferLayout.attributes = vertexAttributes.data();
     vertexBufferLayout.stepMode = VertexStepMode::Vertex; //each vertex is a separate entity (not instanced)
-    vertexBufferLayout.arrayStride = 2 * sizeof(float); //2 consecutive floats
+    vertexBufferLayout.arrayStride = 5 * sizeof(float); //5 consecutive floats (x,y,r,g,b)
 
     renderPipelineDescriptor.vertex.bufferCount = 1;
     renderPipelineDescriptor.vertex.buffers = &vertexBufferLayout;
@@ -578,10 +600,11 @@ RequiredLimits Application::GetRequiredLimits(Adapter adapter)
     RequiredLimits requiredLimits = Default;
 
     //set the required limits
-    requiredLimits.limits.maxVertexAttributes = 1; //for now 1
+    requiredLimits.limits.maxVertexAttributes = 2;
     requiredLimits.limits.maxVertexBuffers = 1; //for now 1
-    requiredLimits.limits.maxBufferSize = 6 * 2 * sizeof(float); //2D vertices
-    requiredLimits.limits.maxVertexBufferArrayStride = 2 * sizeof(float); //2 consecutive floats
+    requiredLimits.limits.maxBufferSize = 6 * 5 * sizeof(float); //6 vertices, 5 floats per vertex
+    requiredLimits.limits.maxVertexBufferArrayStride = 5 * sizeof(float); //5 consecutive floats
+    requiredLimits.limits.maxInterStageShaderComponents = 3; //3 floats forwarded from the vertex shader to the fragment shader
 
     return requiredLimits;
 }
@@ -589,16 +612,16 @@ RequiredLimits Application::GetRequiredLimits(Adapter adapter)
 void Application::InitializeBuffers()
 {
     vector<float> vertices = {
-		-0.5f, -0.5f,
-		0.0f, 0.5f,
-		0.5f, -0.5f,
+		-0.5f, -0.5f, 1.0f, 0.0f, 0.0f,
+		0.0f, 0.5f, 0.0f, 1.0f, 0.0f,
+		0.5f, -0.5f, 0.0f, 0.0f, 1.0f,
 
-        -0.5f, 0.5f,
-        0.0f, -0.5f,
-        0.5f, 0.5f
+        -0.55f, -0.5f, 1.0f, 0.0f, 0.0f,
+        -0.05f, 0.5f, 0.0f, 1.0f, 0.0f,
+        -0.55f, 0.5f, 0.0f, 0.0f, 1.0f
 	};
 
-    this->vertexCount = static_cast<uint32_t>(vertices.size() / 2);
+    this->vertexCount = static_cast<uint32_t>(vertices.size() / 5);
 
     BufferDescriptor bufferDescriptor = {};
     bufferDescriptor.label = "Vertex Buffer";
