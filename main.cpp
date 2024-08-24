@@ -79,7 +79,6 @@ int main() {
 	app.Terminate();
 
 	return 0;
-    
 }
 
 bool Application::Initialize()
@@ -297,7 +296,7 @@ void Application::MainLoop()
 
     renderPassColorAttachment.loadOp = LoadOp::Clear;
     renderPassColorAttachment.storeOp = StoreOp::Store;
-    renderPassColorAttachment.clearValue = Color{ 0.05f, 0.05f, 0.05f, 1.0f }; //any value is fine
+    renderPassColorAttachment.clearValue = Color{ 0.2f, 0.2f, 0.2f, 1.0f }; //any value is fine
 
     #ifndef WEBGPU_BACKEND_WGPU
     renderPassColorAttachment.depthSlice = WGPU_DEPTH_SLICE_UNDEFINED;  //because we do not use the depth buffer

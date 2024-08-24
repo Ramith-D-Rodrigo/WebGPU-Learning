@@ -3,10 +3,11 @@
 #include <sstream>
 #include <string>
 
-#define WEBGPU_CPP_IMPLEMENTATION
 #include <webgpu/webgpu.hpp>
 
 namespace fs = std::filesystem;
+
+using namespace wgpu;
 
 bool loadGeometry(const fs::path& path, std::vector<float>& pointData, std::vector<uint16_t>& indexData) {
     std::ifstream file(path);
@@ -80,8 +81,10 @@ ShaderModule loadShaderModule(const fs::path& path, Device device) {
     shaderCodeDesc.chain.sType = SType::ShaderModuleWGSLDescriptor;
     shaderCodeDesc.code = shaderSource.c_str();
     ShaderModuleDescriptor shaderDesc{};
-    shaderDesc.hintCount = 0;
-    shaderDesc.hints = nullptr;
+    #ifdef WEBGPU_BACKEND_WGPU
+        shaderDesc.hintCount = 0;
+        shaderDesc.hints = nullptr;
+    #endif // WEBGPU_BACKEND_WGPU
     shaderDesc.nextInChain = &shaderCodeDesc.chain;
     return device.createShaderModule(shaderDesc);
 }
