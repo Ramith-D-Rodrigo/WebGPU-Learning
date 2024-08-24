@@ -30,6 +30,10 @@ target_link_libraries(App PRIVATE glfw webgpu glfw3webgpu)
 
 target_copy_webgpu_binaries(App)
 
+target_compile_definitions(App PRIVATE
+    RESOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/resources"
+)
+
 # Set some recommended properties to configure the version of C++ and treat warnings as errors
 set_target_properties(App PROPERTIES
 	CXX_STANDARD 17
@@ -61,4 +65,23 @@ if (EMSCRIPTEN)
 
 	# Enable the use of emscripten_sleep()
 	target_link_options(App PRIVATE -sASYNCIFY)
+endif()
+
+# We add an option to enable different settings when developing the app than
+# when distributing it.
+option(DEV_MODE "Set up development helper settings" ON)
+
+if(DEV_MODE)
+    # In dev mode, we load resources from the source tree, so that when we
+    # dynamically edit resources (like shaders), these are correctly
+    # versionned.
+    target_compile_definitions(App PRIVATE
+        RESOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/resources"
+    )
+else()
+    # In release mode, we just load resources relatively to wherever the
+    # executable is launched from, so that the binary is portable
+    target_compile_definitions(App PRIVATE
+        RESOURCE_DIR="./resources"
+    )
 endif()

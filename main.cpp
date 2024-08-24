@@ -13,6 +13,8 @@
 #include <cassert>
 #include <vector>
 
+#include "utils.h"
+
 using namespace wgpu;
 using namespace std;
 
@@ -41,7 +43,7 @@ private:
     void InitializePipeline();	// Initialize the pipeline
     void PlayWithBuffers();	// Play with buffers
     RequiredLimits GetRequiredLimits(Adapter adapter);	// Get the required limits
-    void InitializeBuffers();
+    bool InitializeBuffers();
 
 private:
     GLFWwindow* window = nullptr;
@@ -50,39 +52,10 @@ private:
     Surface surface = nullptr;
     TextureFormat surfaceFormat = TextureFormat::Undefined;
     RenderPipeline renderPipeline = nullptr;
-    Buffer vertexBuffer = nullptr;
-    uint32_t vertexCount = 0;
+    Buffer pointBuffer = nullptr;
+    Buffer indexBuffer = nullptr;
+    uint32_t indexCount = 0;
 };
-
-const char* shaderSource = R"(
-
-struct VertexInput {
-    @location(0) position: vec2f,
-    @location(1) color: vec3f,
-}
-
-struct VertexOutput {
-    @builtin(position) position: vec4f,
-    // The location here does not refer to a vertex attribute, it just means
-    // that this field must be handled by the rasterizer.
-    // (It can also refer to another field of another struct that would be used
-    // as input to the fragment shader.)
-    @location(0) color: vec3f,
-}
-
-@vertex
-fn vs_main(in: VertexInput) -> VertexOutput {
-    var out: VertexOutput;
-    out.position = vec4f(in.position, 0.0, 1.0);
-    out.color = in.color;
-    return out;
-}
-
-@fragment
-fn fs_main(in: VertexOutput) -> @location(0) vec4f {
-    return vec4f(in.color, 1.0);
-}
-)";
 
 int main() {
     Application app;
@@ -265,14 +238,18 @@ bool Application::Initialize()
 
     //Experimenting with the buffers
     //this->PlayWithBuffers();
-    this->InitializeBuffers();
+    if (!this->InitializeBuffers()) {
+        return false;
+    }
 
     return true;
 }
 
 void Application::Terminate()
 {
-    this->vertexBuffer.release();
+    this->indexBuffer.release();
+    this->pointBuffer.release();
+
     //release the pipeline
     this->renderPipeline.release();
 
@@ -333,9 +310,11 @@ void Application::MainLoop()
 
     // Select which render pipeline to use
     renderPass.setPipeline(this->renderPipeline);
-    renderPass.setVertexBuffer(0, this->vertexBuffer, 0, this->vertexBuffer.getSize());
+    renderPass.setVertexBuffer(0, this->pointBuffer, 0, this->pointBuffer.getSize());
+    //uint must correspond to the index buffer data type
+    renderPass.setIndexBuffer(this->indexBuffer, IndexFormat::Uint16, 0, this->indexBuffer.getSize()); 
     // Draw 1 instance of a 3-vertices shape
-    renderPass.draw(this->vertexCount, 1, 0, 0);
+    renderPass.drawIndexed(this->indexCount, 1, 0, 0, 0);
 
     renderPass.end();
     renderPass.release();
@@ -372,20 +351,7 @@ bool Application::IsRunning()
 
 void Application::InitializePipeline()
 {
-    ShaderModuleDescriptor shaderModuleDescriptor = {};
-    #ifdef WEBGPU_BACKEND_WGPU
-        shaderModuleDescriptor.hintCount = 0;
-        shaderModuleDescriptor.hints = nullptr;
-    #endif
-
-    ShaderModuleWGSLDescriptor shaderModuleWGSLDescriptor = {};
-    shaderModuleWGSLDescriptor.chain.next = nullptr;
-    shaderModuleWGSLDescriptor.chain.sType = SType::ShaderModuleWGSLDescriptor;
-
-    shaderModuleDescriptor.nextInChain = &shaderModuleWGSLDescriptor.chain; //connect the chain
-    shaderModuleWGSLDescriptor.code = shaderSource;
-
-    ShaderModule shaderModule = this->device.createShaderModule(shaderModuleDescriptor);
+    ShaderModule shaderModule = loadShaderModule(RESOURCE_DIR "/shader.wgsl", this->device);
 
     //now create the pipeline
     RenderPipelineDescriptor renderPipelineDescriptor = Default;
@@ -602,33 +568,48 @@ RequiredLimits Application::GetRequiredLimits(Adapter adapter)
     //set the required limits
     requiredLimits.limits.maxVertexAttributes = 2;
     requiredLimits.limits.maxVertexBuffers = 1; //for now 1
-    requiredLimits.limits.maxBufferSize = 6 * 5 * sizeof(float); //6 vertices, 5 floats per vertex
+    requiredLimits.limits.maxBufferSize = 15 * 5 * sizeof(float); //6 vertices, 5 floats per vertex
     requiredLimits.limits.maxVertexBufferArrayStride = 5 * sizeof(float); //5 consecutive floats
     requiredLimits.limits.maxInterStageShaderComponents = 3; //3 floats forwarded from the vertex shader to the fragment shader
 
     return requiredLimits;
 }
 
-void Application::InitializeBuffers()
+bool Application::InitializeBuffers()
 {
-    vector<float> vertices = {
-		-0.5f, -0.5f, 1.0f, 0.0f, 0.0f,
-		0.0f, 0.5f, 0.0f, 1.0f, 0.0f,
-		0.5f, -0.5f, 0.0f, 0.0f, 1.0f,
+    // Define point data
+    // The de-duplicated list of point positions
+    vector<float> pointData;
+    // Define index data
+    // This is a list of indices referencing positions in the pointData
+    vector<uint16_t> indexData;
 
-        -0.55f, -0.5f, 1.0f, 0.0f, 0.0f,
-        -0.05f, 0.5f, 0.0f, 1.0f, 0.0f,
-        -0.55f, 0.5f, 0.0f, 0.0f, 1.0f
-	};
+    bool success = loadGeometry(RESOURCE_DIR "/webgpu.txt", pointData, indexData);
+    if (!success) {
+		cerr << "Failed to load geometry" << endl;
+        return false;
+	}
 
-    this->vertexCount = static_cast<uint32_t>(vertices.size() / 5);
+    this->indexCount = static_cast<uint32_t>(indexData.size());
 
     BufferDescriptor bufferDescriptor = {};
     bufferDescriptor.label = "Vertex Buffer";
-    bufferDescriptor.size = vertices.size() * sizeof(float);
+    bufferDescriptor.size = pointData.size() * sizeof(float);
     bufferDescriptor.usage = BufferUsage::Vertex | BufferUsage::CopyDst; //must add vertex usage
     bufferDescriptor.mappedAtCreation = false;
-    this->vertexBuffer = this->device.createBuffer(bufferDescriptor);
+    this->pointBuffer = this->device.createBuffer(bufferDescriptor);
 
-    this->queue.writeBuffer(this->vertexBuffer, 0, vertices.data(), bufferDescriptor.size);
+    this->queue.writeBuffer(this->pointBuffer, 0, pointData.data(), bufferDescriptor.size);
+
+    //create the index buffer
+    bufferDescriptor.label = "Index Buffer";
+    bufferDescriptor.size = indexData.size() * sizeof(uint32_t);
+    bufferDescriptor.usage = BufferUsage::Index | BufferUsage::CopyDst; //must add index usage
+    this->indexBuffer = this->device.createBuffer(bufferDescriptor);
+
+    bufferDescriptor.size = (bufferDescriptor.size + 3) & ~3; // round up to the next multiple of 4
+
+    this->queue.writeBuffer(this->indexBuffer, 0, indexData.data(), bufferDescriptor.size);
+
+    return true;
 }
