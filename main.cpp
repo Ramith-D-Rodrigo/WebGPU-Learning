@@ -12,6 +12,7 @@
 #include <iostream>
 #include <cassert>
 #include <vector>
+#include <array>
 
 #include "utils.h"
 
@@ -19,7 +20,7 @@ using namespace wgpu;
 using namespace std;
 
 // We define a function that hides implementation-specific variants of device polling:
-void wgpuPollEvents([[maybe_unused]] Device device, [[maybe_unused]] bool yieldToWebBrowser) {
+static void wgpuPollEvents([[maybe_unused]] Device device, [[maybe_unused]] bool yieldToWebBrowser) {
 #if defined(WEBGPU_BACKEND_DAWN)
     device.tick();
 #elif defined(WEBGPU_BACKEND_WGPU)
@@ -30,6 +31,14 @@ void wgpuPollEvents([[maybe_unused]] Device device, [[maybe_unused]] bool yieldT
     }
 #endif
 }
+
+struct MyUniforms {
+    array<float, 4> color;
+    float time;
+    float padding[3]; // padding to make the size of the struct a multiple of 16 bytes
+};
+
+MyUniforms uniforms = {};
 
 class Application {
 public:
@@ -62,6 +71,10 @@ private:
 
 int main() {
     Application app;
+
+    uniforms.time = 0.0f;
+    uniforms.color = { 0.0f, 1.0f, 0.4f, 1.0f };
+
     if(!app.Initialize()) {
 		return 1;
 	}
@@ -290,7 +303,8 @@ void Application::MainLoop()
 
     //update the uniform buffer
     float time = static_cast<float>(glfwGetTime());
-    this->queue.writeBuffer(this->uniformBuffer, 0, &time, sizeof(float));
+    uniforms.time = time;
+    this->queue.writeBuffer(this->uniformBuffer, 0, &uniforms, sizeof(MyUniforms));
 
     CommandEncoderDescriptor commandEncoderDescriptor = {};
     commandEncoderDescriptor.nextInChain = nullptr;
@@ -459,9 +473,9 @@ void Application::InitializePipeline(BindGroupLayoutDescriptor* bindGroupLayoutD
     //create the binding layout
     BindGroupLayoutEntry bindGroupLayoutEntry = Default;
     bindGroupLayoutEntry.binding = 0;   //index as used in the @binding attribute in the shader
-    bindGroupLayoutEntry.visibility = ShaderStage::Vertex; //only the vertex shader will access this buffer
+    bindGroupLayoutEntry.visibility = ShaderStage::Vertex | ShaderStage::Fragment; //both vertex and fragment shaders
     bindGroupLayoutEntry.buffer.type = BufferBindingType::Uniform;
-    bindGroupLayoutEntry.buffer.minBindingSize = sizeof(float);
+    bindGroupLayoutEntry.buffer.minBindingSize = sizeof(MyUniforms);
 
     bindGroupLayoutDescriptor->label = "Bind Group Layout";
     bindGroupLayoutDescriptor->entryCount = 1;
@@ -649,13 +663,12 @@ bool Application::InitializeBuffers(BindGroupLayoutDescriptor* bindGroupLayoutDe
 
     //create the uniform buffer
     bufferDescriptor.label = "Uniform Buffer";
-    bufferDescriptor.size = sizeof(float);
+    bufferDescriptor.size = sizeof(MyUniforms);
     bufferDescriptor.usage = BufferUsage::Uniform | BufferUsage::CopyDst;
     bufferDescriptor.mappedAtCreation = false;
 
     this->uniformBuffer = this->device.createBuffer(bufferDescriptor);
-    float currTime = 0.0f;
-    this->queue.writeBuffer(this->uniformBuffer, 0, &currTime, bufferDescriptor.size);
+    this->queue.writeBuffer(this->uniformBuffer, 0, &uniforms, bufferDescriptor.size);
 
     // Create a binding
     BindGroupEntry binding;
@@ -667,7 +680,7 @@ bool Application::InitializeBuffers(BindGroupLayoutDescriptor* bindGroupLayoutDe
     // multiple uniform blocks.
     binding.offset = 0;
     // And we specify again the size of the buffer.
-    binding.size = sizeof(float);
+    binding.size = sizeof(MyUniforms);
 
     // A bind group contains one or multiple bindings
     BindGroupDescriptor bindGroupDesc;

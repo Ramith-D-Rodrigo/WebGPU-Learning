@@ -1,7 +1,10 @@
-// Variable in the *uniform* address space
-// The memory location of the uniform is given by a pair of a *bind group* and
-// a *binding*.
-@group(0) @binding(0) var<uniform> uTime: f32;
+struct MyUniforms {
+	color: vec4f,
+	time: f32,
+};
+
+
+@group(0) @binding(0) var<uniform> uMyUniforms: MyUniforms;
 
 struct VertexInput {
     @location(0) position: vec2f,
@@ -20,7 +23,7 @@ struct VertexOutput {
 @vertex
 fn vs_main(in: VertexInput) -> VertexOutput {
     var offset = vec2f(-0.6875, -0.463);
-    offset += 0.3 * vec2f(cos(uTime), sin(uTime));
+    offset += 0.3 * vec2f(cos(uMyUniforms.time), sin(uMyUniforms.time));
 
     let ratio = 800.0 / 600.0;
     var out: VertexOutput;
@@ -31,5 +34,6 @@ fn vs_main(in: VertexInput) -> VertexOutput {
 
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4f {
-    return vec4f(in.color, 1.0);
+    let color = in.color * uMyUniforms.color.rgb;
+    return vec4f(color, uMyUniforms.color.a);
 }
