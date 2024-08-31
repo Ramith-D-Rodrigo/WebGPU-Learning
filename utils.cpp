@@ -88,3 +88,9 @@ ShaderModule loadShaderModule(const fs::path& path, Device device) {
     shaderDesc.nextInChain = &shaderCodeDesc.chain;
     return device.createShaderModule(shaderDesc);
 }
+
+// Returns the smallest multiple of `step` that is greater than or equal to `value`.
+uint32_t ceilToNextMultiple(uint32_t value, uint32_t step) {
+    uint32_t divide_and_ceil = value / step + (value % step == 0 ? 0 : 1);
+    return step * divide_and_ceil;
+}

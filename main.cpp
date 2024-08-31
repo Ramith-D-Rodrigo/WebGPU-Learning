@@ -38,7 +38,12 @@ struct MyUniforms {
     float padding[3]; // padding to make the size of the struct a multiple of 16 bytes
 };
 
+static_assert(sizeof(MyUniforms) % 16 == 0, "MyUniforms size must be a multiple of 16 bytes");
+
 MyUniforms uniforms = {};
+
+array<float, 4> colorOne = { 0.0f, 1.0f, 0.4f, 1.0f };
+array<float, 4> colorTwo = { 1.0f, 1.0f, 1.0f, 0.7f };
 
 class Application {
 public:
@@ -67,13 +72,11 @@ private:
     uint32_t indexCount = 0;
     Buffer uniformBuffer = nullptr;
     BindGroup bindGroup = nullptr;
+    uint32_t uniformStride = 0;
 };
 
 int main() {
     Application app;
-
-    uniforms.time = 0.0f;
-    uniforms.color = { 0.0f, 1.0f, 0.4f, 1.0f };
 
     if(!app.Initialize()) {
 		return 1;
@@ -177,7 +180,6 @@ bool Application::Initialize()
     deviceDescriptor.nextInChain = nullptr;
     deviceDescriptor.label = "My Device"; // anything works here, that's your call
     deviceDescriptor.requiredFeatureCount = 0; // we do not require any specific feature
-    deviceDescriptor.requiredLimits = nullptr; // we do not require any specific limit
     deviceDescriptor.defaultQueue.nextInChain = nullptr;
     deviceDescriptor.defaultQueue.label = "The default queue";
 
@@ -253,9 +255,6 @@ bool Application::Initialize()
 
     //initialize the pipeline
     this->InitializePipeline(&bindGroupLayoutDescriptor, &bindGroupLayout);
-    cout<<"After pipeline initialization"<<endl;
-    cout<<"bind group layout is "<<bindGroupLayout<<endl;
-    cout<<"bind group layout descriptor is "<<bindGroupLayoutDescriptor.label<<endl;
 
     //Experimenting with the buffers
     //this->PlayWithBuffers();
@@ -302,9 +301,12 @@ void Application::MainLoop()
     glfwPollEvents();
 
     //update the uniform buffer
-    float time = static_cast<float>(glfwGetTime());
-    uniforms.time = time;
-    this->queue.writeBuffer(this->uniformBuffer, 0, &uniforms, sizeof(MyUniforms));
+    float newTime = static_cast<float>(glfwGetTime());
+    uniforms.time = newTime;
+    this->queue.writeBuffer(this->uniformBuffer, offsetof(MyUniforms, time), &uniforms.time, sizeof(MyUniforms::time));
+
+    uniforms.time = -newTime * 10;
+    this->queue.writeBuffer(this->uniformBuffer, this->uniformStride + offsetof(MyUniforms, time), &uniforms.time, sizeof(MyUniforms::time));
 
     CommandEncoderDescriptor commandEncoderDescriptor = {};
     commandEncoderDescriptor.nextInChain = nullptr;
@@ -339,9 +341,20 @@ void Application::MainLoop()
     renderPass.setVertexBuffer(0, this->pointBuffer, 0, this->pointBuffer.getSize());
     //uint must correspond to the index buffer data type
     renderPass.setIndexBuffer(this->indexBuffer, IndexFormat::Uint16, 0, this->indexBuffer.getSize()); 
-    // Set the binding group
-    renderPass.setBindGroup(0, this->bindGroup, 0, nullptr);
 
+    // dynamic offset for multiple uniform buffers
+    uint32_t dynamicOffset = 0;
+
+    dynamicOffset = 0 * this->uniformStride;
+
+    // Set the binding group
+    renderPass.setBindGroup(0, this->bindGroup, 1, &dynamicOffset);
+    // Draw 1 instance of a 3-vertices shape
+    renderPass.drawIndexed(this->indexCount, 1, 0, 0, 0);
+
+    // Set the binding group with different dynamic offset
+    dynamicOffset = 1 * this->uniformStride;
+    renderPass.setBindGroup(0, this->bindGroup, 1, &dynamicOffset);
     // Draw 1 instance of a 3-vertices shape
     renderPass.drawIndexed(this->indexCount, 1, 0, 0, 0);
 
@@ -476,6 +489,7 @@ void Application::InitializePipeline(BindGroupLayoutDescriptor* bindGroupLayoutD
     bindGroupLayoutEntry.visibility = ShaderStage::Vertex | ShaderStage::Fragment; //both vertex and fragment shaders
     bindGroupLayoutEntry.buffer.type = BufferBindingType::Uniform;
     bindGroupLayoutEntry.buffer.minBindingSize = sizeof(MyUniforms);
+    bindGroupLayoutEntry.buffer.hasDynamicOffset = true; 
 
     bindGroupLayoutDescriptor->label = "Bind Group Layout";
     bindGroupLayoutDescriptor->entryCount = 1;
@@ -617,10 +631,13 @@ RequiredLimits Application::GetRequiredLimits(Adapter adapter)
     requiredLimits.limits.maxVertexBuffers = 1; //for now 1
     requiredLimits.limits.maxBufferSize = 15 * 5 * sizeof(float); //6 vertices, 5 floats per vertex
     requiredLimits.limits.maxVertexBufferArrayStride = 5 * sizeof(float); //5 consecutive floats
+    requiredLimits.limits.minStorageBufferOffsetAlignment = supportedLimits.limits.minStorageBufferOffsetAlignment;
+    requiredLimits.limits.minUniformBufferOffsetAlignment = supportedLimits.limits.minUniformBufferOffsetAlignment;
     requiredLimits.limits.maxInterStageShaderComponents = 3; //3 floats forwarded from the vertex shader to the fragment shader
     requiredLimits.limits.maxBindGroups = 1; //for now 1
     requiredLimits.limits.maxUniformBuffersPerShaderStage = 1; //for now 1
     requiredLimits.limits.maxUniformBufferBindingSize = 16 * sizeof(float); //16 floats
+    requiredLimits.limits.maxDynamicUniformBuffersPerPipelineLayout = 1; //for now 1
 
     return requiredLimits;
 }
@@ -662,13 +679,30 @@ bool Application::InitializeBuffers(BindGroupLayoutDescriptor* bindGroupLayoutDe
     this->queue.writeBuffer(this->indexBuffer, 0, indexData.data(), bufferDescriptor.size);
 
     //create the uniform buffer
+    SupportedLimits limits;
+    this->device.getLimits(&limits);
+    this->uniformStride = ceilToNextMultiple((uint32_t)sizeof(MyUniforms), (uint32_t)limits.limits.minUniformBufferOffsetAlignment);
+
     bufferDescriptor.label = "Uniform Buffer";
-    bufferDescriptor.size = sizeof(MyUniforms);
+    bufferDescriptor.size = sizeof(MyUniforms) + this->uniformStride;
     bufferDescriptor.usage = BufferUsage::Uniform | BufferUsage::CopyDst;
     bufferDescriptor.mappedAtCreation = false;
 
+    cout<<"Creating uniform buffer"<<endl;
     this->uniformBuffer = this->device.createBuffer(bufferDescriptor);
-    this->queue.writeBuffer(this->uniformBuffer, 0, &uniforms, bufferDescriptor.size);
+    cout<<"Uniform buffer created successfully"<<endl;
+
+    uniforms.time = 1.0f;
+    uniforms.color = colorOne;
+    cout<<"Writing to the uniform buffer"<<endl;
+    this->queue.writeBuffer(this->uniformBuffer, 0, &uniforms, sizeof(MyUniforms));
+    cout<<"Uniform buffer written successfully"<<endl;
+
+    uniforms.time = -1.0f;
+    uniforms.color = colorTwo;
+    cout<<"Writing to the uniform buffer"<<endl;
+    this->queue.writeBuffer(this->uniformBuffer, this->uniformStride, &uniforms, sizeof(MyUniforms));
+    cout<<"Uniform buffer written successfully"<<endl;
 
     // Create a binding
     BindGroupEntry binding;
@@ -689,6 +723,8 @@ bool Application::InitializeBuffers(BindGroupLayoutDescriptor* bindGroupLayoutDe
     bindGroupDesc.entryCount = bindGroupLayoutDescriptor->entryCount;
     bindGroupDesc.entries = &binding;
     this->bindGroup = device.createBindGroup(bindGroupDesc);
+
+    cout<<"Buffers initialized successfully"<<endl;
 
     return true;
 }
