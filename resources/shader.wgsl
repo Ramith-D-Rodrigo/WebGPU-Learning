@@ -7,7 +7,7 @@ struct MyUniforms {
 @group(0) @binding(0) var<uniform> uMyUniforms: MyUniforms;
 
 struct VertexInput {
-    @location(0) position: vec2f,
+    @location(0) position: vec3f,
     @location(1) color: vec3f,
 }
 

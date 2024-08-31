@@ -301,12 +301,12 @@ void Application::MainLoop()
     glfwPollEvents();
 
     //update the uniform buffer
-    float newTime = static_cast<float>(glfwGetTime());
-    uniforms.time = newTime;
-    this->queue.writeBuffer(this->uniformBuffer, offsetof(MyUniforms, time), &uniforms.time, sizeof(MyUniforms::time));
+    //float newTime = static_cast<float>(glfwGetTime());
+    //uniforms.time = newTime;
+    //this->queue.writeBuffer(this->uniformBuffer, offsetof(MyUniforms, time), &uniforms.time, sizeof(MyUniforms::time));
 
-    uniforms.time = -newTime * 10;
-    this->queue.writeBuffer(this->uniformBuffer, this->uniformStride + offsetof(MyUniforms, time), &uniforms.time, sizeof(MyUniforms::time));
+    //uniforms.time = -newTime * 10;
+    //this->queue.writeBuffer(this->uniformBuffer, this->uniformStride + offsetof(MyUniforms, time), &uniforms.time, sizeof(MyUniforms::time));
 
     CommandEncoderDescriptor commandEncoderDescriptor = {};
     commandEncoderDescriptor.nextInChain = nullptr;
@@ -343,20 +343,20 @@ void Application::MainLoop()
     renderPass.setIndexBuffer(this->indexBuffer, IndexFormat::Uint16, 0, this->indexBuffer.getSize()); 
 
     // dynamic offset for multiple uniform buffers
-    uint32_t dynamicOffset = 0;
+    //uint32_t dynamicOffset = 0;
 
-    dynamicOffset = 0 * this->uniformStride;
+    //dynamicOffset = 0 * this->uniformStride;
 
     // Set the binding group
-    renderPass.setBindGroup(0, this->bindGroup, 1, &dynamicOffset);
+    renderPass.setBindGroup(0, this->bindGroup, 0, nullptr);
     // Draw 1 instance of a 3-vertices shape
     renderPass.drawIndexed(this->indexCount, 1, 0, 0, 0);
 
     // Set the binding group with different dynamic offset
-    dynamicOffset = 1 * this->uniformStride;
-    renderPass.setBindGroup(0, this->bindGroup, 1, &dynamicOffset);
+    //dynamicOffset = 1 * this->uniformStride;
+    //renderPass.setBindGroup(0, this->bindGroup, 1, &dynamicOffset);
     // Draw 1 instance of a 3-vertices shape
-    renderPass.drawIndexed(this->indexCount, 1, 0, 0, 0);
+    //renderPass.drawIndexed(this->indexCount, 1, 0, 0, 0);
 
     renderPass.end();
     renderPass.release();
@@ -403,18 +403,18 @@ void Application::InitializePipeline(BindGroupLayoutDescriptor* bindGroupLayoutD
     VertexBufferLayout vertexBufferLayout;
     vector<VertexAttribute> vertexAttributes(2);
 
-    vertexAttributes[0].format = VertexFormat::Float32x2; //2D vertices
+    vertexAttributes[0].format = VertexFormat::Float32x3; //XYZ position (3D)
     vertexAttributes[0].offset = 0;
     vertexAttributes[0].shaderLocation = 0; //location in the shader (@location(0))
 
     vertexAttributes[1].format = VertexFormat::Float32x3; //RGB color
-    vertexAttributes[1].offset = 2 * sizeof(float); //2 floats for the position (non null offset)
+    vertexAttributes[1].offset = 3 * sizeof(float); //3 floats for the position
     vertexAttributes[1].shaderLocation = 1; //location in the shader (@location(1))
 
     vertexBufferLayout.attributeCount = static_cast<uint32_t>(vertexAttributes.size());
     vertexBufferLayout.attributes = vertexAttributes.data();
     vertexBufferLayout.stepMode = VertexStepMode::Vertex; //each vertex is a separate entity (not instanced)
-    vertexBufferLayout.arrayStride = 5 * sizeof(float); //5 consecutive floats (x,y,r,g,b)
+    vertexBufferLayout.arrayStride = 6 * sizeof(float); //6 consecutive floats (x,y,z,r,g,b)
 
     renderPipelineDescriptor.vertex.bufferCount = 1;
     renderPipelineDescriptor.vertex.buffers = &vertexBufferLayout;
@@ -489,7 +489,7 @@ void Application::InitializePipeline(BindGroupLayoutDescriptor* bindGroupLayoutD
     bindGroupLayoutEntry.visibility = ShaderStage::Vertex | ShaderStage::Fragment; //both vertex and fragment shaders
     bindGroupLayoutEntry.buffer.type = BufferBindingType::Uniform;
     bindGroupLayoutEntry.buffer.minBindingSize = sizeof(MyUniforms);
-    bindGroupLayoutEntry.buffer.hasDynamicOffset = true; 
+    //bindGroupLayoutEntry.buffer.hasDynamicOffset = true; 
 
     bindGroupLayoutDescriptor->label = "Bind Group Layout";
     bindGroupLayoutDescriptor->entryCount = 1;
@@ -630,14 +630,14 @@ RequiredLimits Application::GetRequiredLimits(Adapter adapter)
     requiredLimits.limits.maxVertexAttributes = 2;
     requiredLimits.limits.maxVertexBuffers = 1; //for now 1
     requiredLimits.limits.maxBufferSize = 15 * 5 * sizeof(float); //6 vertices, 5 floats per vertex
-    requiredLimits.limits.maxVertexBufferArrayStride = 5 * sizeof(float); //5 consecutive floats
+    requiredLimits.limits.maxVertexBufferArrayStride = 6 * sizeof(float); //6 floats per vertex
     requiredLimits.limits.minStorageBufferOffsetAlignment = supportedLimits.limits.minStorageBufferOffsetAlignment;
     requiredLimits.limits.minUniformBufferOffsetAlignment = supportedLimits.limits.minUniformBufferOffsetAlignment;
     requiredLimits.limits.maxInterStageShaderComponents = 3; //3 floats forwarded from the vertex shader to the fragment shader
     requiredLimits.limits.maxBindGroups = 1; //for now 1
     requiredLimits.limits.maxUniformBuffersPerShaderStage = 1; //for now 1
     requiredLimits.limits.maxUniformBufferBindingSize = 16 * sizeof(float); //16 floats
-    requiredLimits.limits.maxDynamicUniformBuffersPerPipelineLayout = 1; //for now 1
+    //requiredLimits.limits.maxDynamicUniformBuffersPerPipelineLayout = 1; //for now 1
 
     return requiredLimits;
 }
@@ -651,7 +651,7 @@ bool Application::InitializeBuffers(BindGroupLayoutDescriptor* bindGroupLayoutDe
     // This is a list of indices referencing positions in the pointData
     vector<uint16_t> indexData;
 
-    bool success = loadGeometry(RESOURCE_DIR "/webgpu.txt", pointData, indexData);
+    bool success = loadGeometry(RESOURCE_DIR "/pyramid.txt", pointData, indexData, 3);
     if (!success) {
 		cerr << "Failed to load geometry" << endl;
         return false;
@@ -688,21 +688,15 @@ bool Application::InitializeBuffers(BindGroupLayoutDescriptor* bindGroupLayoutDe
     bufferDescriptor.usage = BufferUsage::Uniform | BufferUsage::CopyDst;
     bufferDescriptor.mappedAtCreation = false;
 
-    cout<<"Creating uniform buffer"<<endl;
     this->uniformBuffer = this->device.createBuffer(bufferDescriptor);
-    cout<<"Uniform buffer created successfully"<<endl;
 
     uniforms.time = 1.0f;
     uniforms.color = colorOne;
-    cout<<"Writing to the uniform buffer"<<endl;
     this->queue.writeBuffer(this->uniformBuffer, 0, &uniforms, sizeof(MyUniforms));
-    cout<<"Uniform buffer written successfully"<<endl;
 
-    uniforms.time = -1.0f;
-    uniforms.color = colorTwo;
-    cout<<"Writing to the uniform buffer"<<endl;
-    this->queue.writeBuffer(this->uniformBuffer, this->uniformStride, &uniforms, sizeof(MyUniforms));
-    cout<<"Uniform buffer written successfully"<<endl;
+    //uniforms.time = -1.0f;
+    //uniforms.color = colorTwo;
+    //this->queue.writeBuffer(this->uniformBuffer, this->uniformStride, &uniforms, sizeof(MyUniforms));
 
     // Create a binding
     BindGroupEntry binding;
