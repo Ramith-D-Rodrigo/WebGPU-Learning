@@ -22,14 +22,25 @@ struct VertexOutput {
 
 @vertex
 fn vs_main(in: VertexInput) -> VertexOutput {
-    var offset = vec2f(-0.6875, -0.463);
-    offset += 0.3 * vec2f(cos(uMyUniforms.time), sin(uMyUniforms.time));
+	var out: VertexOutput;
+	let ratio = 800.0 / 600.0;
+	var offset = vec2f(0.0);
 
-    let ratio = 800.0 / 600.0;
-    var out: VertexOutput;
-    out.position = vec4f(in.position.x + offset.x, (in.position.y + offset.y) * ratio, 0.0, 1.0);
-    out.color = in.color;
-    return out;
+	let angle = uMyUniforms.time; // you can multiply it go rotate faster
+
+	// Rotate the position around the X axis by "mixing" a bit of Y and Z in
+	// the original Y and Z.
+	let alpha = cos(angle);
+	let beta = sin(angle);
+	var position = vec3f(
+		in.position.x,
+		alpha * in.position.y + beta * in.position.z,
+		alpha * in.position.z - beta * in.position.y,
+	);
+	out.position = vec4f(position.x, position.y * ratio, position.z * 0.5 + 0.5, 1.0);	
+
+	out.color = in.color;
+	return out;
 }
 
 @fragment

@@ -16,6 +16,9 @@
 
 #include "utils.h"
 
+#define WINDOW_WIDTH 800
+#define WINDOW_HEIGHT 600
+
 using namespace wgpu;
 using namespace std;
 
@@ -73,6 +76,8 @@ private:
     Buffer uniformBuffer = nullptr;
     BindGroup bindGroup = nullptr;
     uint32_t uniformStride = 0;
+    Texture depthTexture = nullptr;
+    TextureView depthTextureView = nullptr;
 };
 
 int main() {
@@ -110,7 +115,7 @@ bool Application::Initialize()
     //create a window
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
     glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
-    this->window = glfwCreateWindow(800, 600, "WebGPU", nullptr, nullptr);
+    this->window = glfwCreateWindow(WINDOW_WIDTH, WINDOW_HEIGHT, "WebGPU", nullptr, nullptr);
     if (!this->window) {
         cout << "Failed to create window" << endl;
         glfwTerminate();
@@ -230,8 +235,8 @@ bool Application::Initialize()
     //configure the surface
     SurfaceConfiguration config = {};
     config.nextInChain = nullptr;
-    config.width = 800;
-    config.height = 600;
+    config.width = WINDOW_WIDTH;
+    config.height = WINDOW_HEIGHT;
 
     this->surfaceFormat = this->surface.getPreferredFormat(adapter);
     config.format = surfaceFormat;
@@ -267,8 +272,15 @@ bool Application::Initialize()
 
 void Application::Terminate()
 {
+    this->indexBuffer.destroy();
     this->indexBuffer.release();
+    this->pointBuffer.destroy();
     this->pointBuffer.release();
+
+    // Destroy the depth texture and its view
+    this->depthTextureView.release();
+    this->depthTexture.destroy();
+    this->depthTexture.release();
 
     //release the pipeline
     this->renderPipeline.release();
@@ -333,6 +345,26 @@ void Application::MainLoop()
 
     renderPassDescriptor.colorAttachmentCount = 1;
     renderPassDescriptor.colorAttachments = &renderPassColorAttachment;
+
+    //Add a depth/stencil attachment
+    RenderPassDepthStencilAttachment renderPassDepthStencilAttachment = {};
+    renderPassDepthStencilAttachment.view = this->depthTextureView;
+    renderPassDepthStencilAttachment.depthClearValue = 1.0f;    //initial far value
+    renderPassDepthStencilAttachment.depthLoadOp = LoadOp::Clear;
+    renderPassDepthStencilAttachment.depthStoreOp = StoreOp::Store;
+    renderPassDepthStencilAttachment.depthReadOnly = false; //turn off writing to the depth buffer globally
+
+    //mandatory for depth/stencil attachment
+    renderPassDepthStencilAttachment.stencilClearValue = 0;    //initial stencil value
+    renderPassDepthStencilAttachment.stencilLoadOp = LoadOp::Undefined;
+    renderPassDepthStencilAttachment.stencilStoreOp = StoreOp::Undefined;
+    renderPassDepthStencilAttachment.stencilReadOnly = true;
+
+    //constexpr auto NaNf = std::numeric_limits<float>::quiet_NaN();
+    //renderPassDepthStencilAttachment.clearDepth = NaNf;
+
+
+    renderPassDescriptor.depthStencilAttachment = &renderPassDepthStencilAttachment;
 
     RenderPassEncoder renderPass = encoder.beginRenderPass(renderPassDescriptor);
 
@@ -454,7 +486,42 @@ void Application::InitializePipeline(BindGroupLayoutDescriptor* bindGroupLayoutD
     fragmentState.constants = nullptr;
 
     //stencil/depth pipeline state
-    renderPipelineDescriptor.depthStencil = nullptr;
+    DepthStencilState depthStencilState = Default;
+    depthStencilState.depthCompare = CompareFunction::Less; //only blend the pixel if the depth is less than the existing depth
+    depthStencilState.depthWriteEnabled = true; //write the depth value to the depth buffer every time a pixel is drawn
+    TextureFormat depthTextureFormat = TextureFormat::Depth24Plus;
+    depthStencilState.format = depthTextureFormat;
+
+    //disable stencil
+    depthStencilState.stencilReadMask = 0;
+    depthStencilState.stencilWriteMask = 0;
+
+    renderPipelineDescriptor.depthStencil = &depthStencilState;
+
+    //Create depth texture
+    TextureDescriptor depthTextureDescriptor = {};
+    depthTextureDescriptor.dimension = TextureDimension::_2D;
+    depthTextureDescriptor.format = depthTextureFormat;
+    depthTextureDescriptor.mipLevelCount = 1;
+    depthTextureDescriptor.sampleCount = 1;
+    depthTextureDescriptor.size = { WINDOW_WIDTH, WINDOW_HEIGHT, 1 };
+    depthTextureDescriptor.usage = TextureUsage::RenderAttachment;
+    depthTextureDescriptor.viewFormatCount = 1;
+    depthTextureDescriptor.viewFormats = (WGPUTextureFormat*) &depthTextureFormat;
+
+    this->depthTexture = this->device.createTexture(depthTextureDescriptor);
+
+    //Create depth texture view
+    TextureViewDescriptor depthTextureViewDescriptor = {};
+    depthTextureViewDescriptor.aspect = TextureAspect::DepthOnly;
+    depthTextureViewDescriptor.baseArrayLayer = 0;
+    depthTextureViewDescriptor.arrayLayerCount = 1;
+    depthTextureViewDescriptor.baseMipLevel = 0;
+    depthTextureViewDescriptor.mipLevelCount = 1;
+    depthTextureViewDescriptor.dimension = TextureViewDimension::_2D;
+    depthTextureViewDescriptor.format = depthTextureFormat;
+
+    this->depthTextureView = this->depthTexture.createView(depthTextureViewDescriptor);
 
     //blend pipeline state
     BlendState blendState = {};
@@ -638,6 +705,10 @@ RequiredLimits Application::GetRequiredLimits(Adapter adapter)
     requiredLimits.limits.maxUniformBuffersPerShaderStage = 1; //for now 1
     requiredLimits.limits.maxUniformBufferBindingSize = 16 * sizeof(float); //16 floats
     //requiredLimits.limits.maxDynamicUniformBuffersPerPipelineLayout = 1; //for now 1
+
+    requiredLimits.limits.maxTextureDimension1D = WINDOW_HEIGHT;
+    requiredLimits.limits.maxTextureDimension2D = WINDOW_WIDTH;
+    requiredLimits.limits.maxTextureArrayLayers = 1;
 
     return requiredLimits;
 }
