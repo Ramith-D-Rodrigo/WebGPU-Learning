@@ -14,6 +14,9 @@
 #include <vector>
 #include <array>
 
+#include <glm/glm.hpp>
+#include <glm/ext.hpp>
+
 #include "utils.h"
 
 #define WINDOW_WIDTH 800
@@ -21,6 +24,7 @@
 
 using namespace wgpu;
 using namespace std;
+using namespace glm;
 
 // We define a function that hides implementation-specific variants of device polling:
 static void wgpuPollEvents([[maybe_unused]] Device device, [[maybe_unused]] bool yieldToWebBrowser) {
@@ -36,7 +40,10 @@ static void wgpuPollEvents([[maybe_unused]] Device device, [[maybe_unused]] bool
 }
 
 struct MyUniforms {
-    array<float, 4> color;
+    mat4x4 projectionMatrix;
+    mat4x4 viewMatrix;
+    mat4x4 modelMatrix;
+    vec4 color;
     float time;
     float padding[3]; // padding to make the size of the struct a multiple of 16 bytes
 };
@@ -45,8 +52,8 @@ static_assert(sizeof(MyUniforms) % 16 == 0, "MyUniforms size must be a multiple 
 
 MyUniforms uniforms = {};
 
-array<float, 4> colorOne = { 0.0f, 1.0f, 0.4f, 1.0f };
-array<float, 4> colorTwo = { 1.0f, 1.0f, 1.0f, 0.7f };
+vec4 colorOne = { 0.0f, 1.0f, 0.4f, 1.0f };
+vec4 colorTwo = { 1.0f, 1.0f, 1.0f, 0.7f };
 
 class Application {
 public:
@@ -78,6 +85,12 @@ private:
     uint32_t uniformStride = 0;
     Texture depthTexture = nullptr;
     TextureView depthTextureView = nullptr;
+
+    mat4x4 S = glm::scale(mat4x4(1.0), vec3(2.0f));
+    mat4x4 T1 = glm::translate(mat4x4(1.0), vec3(0.5, 0.0, 0.0));
+    mat4x4 T2 = glm::translate(mat4x4(1.0), vec3(0.0, 0.0, -2.0));
+    mat4x4 R1 = glm::rotate(mat4x4(1.0), 0.0f, vec3(0.0, 0.0, 1.0));
+    mat4x4 R2 = glm::rotate(mat4x4(1.0), 0.0f, vec3(1.0, 0.0, 0.0));
 };
 
 int main() {
@@ -312,13 +325,17 @@ void Application::MainLoop()
 
     glfwPollEvents();
 
-    //update the uniform buffer
-    //float newTime = static_cast<float>(glfwGetTime());
-    //uniforms.time = newTime;
-    //this->queue.writeBuffer(this->uniformBuffer, offsetof(MyUniforms, time), &uniforms.time, sizeof(MyUniforms::time));
+    //update the uniform buffer 
+    uniforms.time = static_cast<float>(glfwGetTime());
+    this->queue.writeBuffer(this->uniformBuffer, offsetof(MyUniforms, time), &uniforms.time, sizeof(MyUniforms::time));
 
     //uniforms.time = -newTime * 10;
     //this->queue.writeBuffer(this->uniformBuffer, this->uniformStride + offsetof(MyUniforms, time), &uniforms.time, sizeof(MyUniforms::time));
+
+    float angle = uniforms.time;
+    R1 = glm::rotate(mat4x4(1.0), angle, vec3(0.0, 0.0, 1.0));
+    uniforms.modelMatrix = R1 * T1 * S;
+    queue.writeBuffer(uniformBuffer, offsetof(MyUniforms, modelMatrix), &uniforms.modelMatrix, sizeof(MyUniforms::modelMatrix));
 
     CommandEncoderDescriptor commandEncoderDescriptor = {};
     commandEncoderDescriptor.nextInChain = nullptr;
@@ -703,7 +720,7 @@ RequiredLimits Application::GetRequiredLimits(Adapter adapter)
     requiredLimits.limits.maxInterStageShaderComponents = 3; //3 floats forwarded from the vertex shader to the fragment shader
     requiredLimits.limits.maxBindGroups = 1; //for now 1
     requiredLimits.limits.maxUniformBuffersPerShaderStage = 1; //for now 1
-    requiredLimits.limits.maxUniformBufferBindingSize = 16 * sizeof(float); //16 floats
+    requiredLimits.limits.maxUniformBufferBindingSize = 16 * 4 * sizeof(float);
     //requiredLimits.limits.maxDynamicUniformBuffersPerPipelineLayout = 1; //for now 1
 
     requiredLimits.limits.maxTextureDimension1D = WINDOW_HEIGHT;
@@ -760,6 +777,30 @@ bool Application::InitializeBuffers(BindGroupLayoutDescriptor* bindGroupLayoutDe
     bufferDescriptor.mappedAtCreation = false;
 
     this->uniformBuffer = this->device.createBuffer(bufferDescriptor);
+
+    constexpr float PI = 3.14159265358979323846f;
+
+    float angle1 = (float)glfwGetTime();
+    float angle2 = 3.0f * PI / 4.0;
+    vec3 focalPoint(0.0, 0.0, -2.0);
+
+    this->S = glm::scale(mat4x4(1.0), vec3(0.5f));
+    this->T1 = glm::translate(mat4x4(1.0), vec3(0.5, 0.0, 0.0));
+    this->R1 = glm::rotate(mat4x4(1.0), angle1, vec3(0.0, 0.0, 1.0));
+    uniforms.modelMatrix = R1 * T1 * S;
+
+    this->R2 = glm::rotate(mat4x4(1.0), -angle2, vec3(1.0, 0.0, 0.0));
+    this->T2 = glm::translate(mat4x4(1.0), -focalPoint);
+    uniforms.viewMatrix = T2 * R2;
+
+    // Set the projection matrix
+    float ratio = WINDOW_WIDTH / WINDOW_HEIGHT;
+    float focalLength = 2.0;
+    float near = 0.01f;
+    float far = 100.0f;
+    float fov = 2 * glm::atan(1 / focalLength);
+    uniforms.projectionMatrix = glm::perspective(fov, ratio, near, far);
+
 
     uniforms.time = 1.0f;
     uniforms.color = colorOne;

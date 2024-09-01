@@ -1,4 +1,7 @@
 struct MyUniforms {
+	projectionMatrix: mat4x4f,
+	viewMatrix: mat4x4f,
+	modelMatrix: mat4x4f,
 	color: vec4f,
 	time: f32,
 };
@@ -23,22 +26,7 @@ struct VertexOutput {
 @vertex
 fn vs_main(in: VertexInput) -> VertexOutput {
 	var out: VertexOutput;
-	let ratio = 800.0 / 600.0;
-	var offset = vec2f(0.0);
-
-	let angle = uMyUniforms.time; // you can multiply it go rotate faster
-
-	// Rotate the position around the X axis by "mixing" a bit of Y and Z in
-	// the original Y and Z.
-	let alpha = cos(angle);
-	let beta = sin(angle);
-	var position = vec3f(
-		in.position.x,
-		alpha * in.position.y + beta * in.position.z,
-		alpha * in.position.z - beta * in.position.y,
-	);
-	out.position = vec4f(position.x, position.y * ratio, position.z * 0.5 + 0.5, 1.0);	
-
+	out.position = uMyUniforms.projectionMatrix * uMyUniforms.viewMatrix * uMyUniforms.modelMatrix * vec4f(in.position, 1.0f);	
 	out.color = in.color;
 	return out;
 }

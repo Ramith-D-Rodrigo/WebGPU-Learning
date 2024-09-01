@@ -28,6 +28,8 @@ add_executable(App
 
 target_link_libraries(App PRIVATE glfw webgpu glfw3webgpu)
 
+target_include_directories(App PRIVATE .)
+
 target_copy_webgpu_binaries(App)
 
 target_compile_definitions(App PRIVATE
@@ -85,3 +87,6 @@ else()
         RESOURCE_DIR="./resources"
     )
 endif()
+
+target_compile_definitions(App PRIVATE GLM_FORCE_DEPTH_ZERO_TO_ONE)
+target_compile_definitions(App PRIVATE GLM_FORCE_LEFT_HANDED)
