@@ -102,6 +102,7 @@ private:
     TextureView depthTextureView = nullptr;
     Texture colorTexture = nullptr;
     TextureView colorTextureView = nullptr;
+    Sampler sampler = nullptr;
 
     mat4x4 S = glm::scale(mat4x4(1.0), vec3(2.0f));
     mat4x4 T1 = glm::translate(mat4x4(1.0), vec3(0.5, 0.0, 0.0));
@@ -573,12 +574,11 @@ void Application::InitializePipeline(BindGroupLayoutDescriptor* bindGroupLayoutD
 
     this->depthTextureView = this->depthTexture.createView(depthTextureViewDescriptor);
 
-
     //Create color texture
     TextureDescriptor textureDescriptor = {};
     textureDescriptor.dimension = TextureDimension::_2D;
     textureDescriptor.format = TextureFormat::RGBA8Unorm;
-    textureDescriptor.mipLevelCount = 1;
+    textureDescriptor.mipLevelCount = 8;
     textureDescriptor.sampleCount = 1;
     textureDescriptor.size = { WINDOW_WIDTH, WINDOW_HEIGHT, 1 };
     textureDescriptor.usage = TextureUsage::TextureBinding | TextureUsage::CopyDst; //copy is needed to copy pixel data from c++ code
@@ -593,12 +593,26 @@ void Application::InitializePipeline(BindGroupLayoutDescriptor* bindGroupLayoutD
     textureViewDesc.baseArrayLayer = 0;
     textureViewDesc.arrayLayerCount = 1;
     textureViewDesc.baseMipLevel = 0;
-    textureViewDesc.mipLevelCount = 1;
+    textureViewDesc.mipLevelCount = textureDescriptor.mipLevelCount;
     textureViewDesc.dimension = TextureViewDimension::_2D;
     textureViewDesc.format = textureDescriptor.format;
     this->colorTextureView = this->colorTexture.createView(textureViewDesc);
 
-    vector<uint8_t> pixels = createGradientTexture(textureDescriptor);
+    //vector<uint8_t> pixels = createAmazingTexture(textureDescriptor);
+
+    // Create a sampler
+    SamplerDescriptor samplerDesc = {};
+    samplerDesc.addressModeU = AddressMode::Repeat;
+    samplerDesc.addressModeV = AddressMode::Repeat;
+    samplerDesc.addressModeW = AddressMode::ClampToEdge;
+    samplerDesc.magFilter = FilterMode::Linear;
+    samplerDesc.minFilter = FilterMode::Linear;
+    samplerDesc.mipmapFilter = MipmapFilterMode::Linear;
+    samplerDesc.lodMinClamp = 0.0f;
+    samplerDesc.lodMaxClamp = 8.0f;
+    samplerDesc.compare = CompareFunction::Undefined;
+    samplerDesc.maxAnisotropy = 1;
+    this->sampler = this->device.createSampler(samplerDesc);
 
     // Arguments telling which part of the texture we upload to
     // (together with the last argument of writeTexture)
@@ -614,7 +628,46 @@ void Application::InitializePipeline(BindGroupLayoutDescriptor* bindGroupLayoutD
     source.bytesPerRow = 4 * textureDescriptor.size.width;
     source.rowsPerImage = textureDescriptor.size.height;
 
-    queue.writeTexture(destination, pixels.data(), pixels.size(), source, textureDescriptor.size);
+    Extent3D mipLevelSize = textureDescriptor.size;
+    std::vector<uint8_t> previousLevelPixels;
+	for (uint32_t level = 0; level < textureDescriptor.mipLevelCount; ++level) {
+        // Create image data for this mip level
+        vector<uint8_t> pixels(4 * mipLevelSize.width * mipLevelSize.height);
+        for (uint32_t i = 0; i < mipLevelSize.width; ++i) {
+            for (uint32_t j = 0; j < mipLevelSize.height; ++j) {
+                uint8_t* p = &pixels[4 * (j * mipLevelSize.width + i)];
+                if (level == 0) {
+                    p[0] = (i / 16) % 2 == (j / 16) % 2 ? 255 : 0; // r
+                    p[1] = ((i - j) / 16) % 2 == 0 ? 255 : 0; // g
+                    p[2] = ((i + j) / 16) % 2 == 0 ? 255 : 0; // b
+                }
+                else {
+                    // Get the corresponding 4 pixels from the previous level
+                    uint8_t* p00 = &previousLevelPixels[4 * ((2 * j + 0) * (2 * mipLevelSize.width) + (2 * i + 0))];
+                    uint8_t* p01 = &previousLevelPixels[4 * ((2 * j + 0) * (2 * mipLevelSize.width) + (2 * i + 1))];
+                    uint8_t* p10 = &previousLevelPixels[4 * ((2 * j + 1) * (2 * mipLevelSize.width) + (2 * i + 0))];
+                    uint8_t* p11 = &previousLevelPixels[4 * ((2 * j + 1) * (2 * mipLevelSize.width) + (2 * i + 1))];
+                    // Average
+                    p[0] = (p00[0] + p01[0] + p10[0] + p11[0]) / 4;
+                    p[1] = (p00[1] + p01[1] + p10[1] + p11[1]) / 4;
+                    p[2] = (p00[2] + p01[2] + p10[2] + p11[2]) / 4;
+                }
+                p[3] = 255; // a
+            }
+        }
+        destination.mipLevel = level;
+
+        //compute the size of the texture
+        source.bytesPerRow = 4 * mipLevelSize.width;
+        source.rowsPerImage = mipLevelSize.height;
+
+        this->queue.writeTexture(destination, pixels.data(), pixels.size(), source, mipLevelSize);
+
+        //decrease the size for the next mip level
+        mipLevelSize.width /= 2;
+        mipLevelSize.height /= 2;
+        previousLevelPixels = std::move(pixels);
+	}
 
     //blend pipeline state
     BlendState blendState = {};
@@ -644,8 +697,7 @@ void Application::InitializePipeline(BindGroupLayoutDescriptor* bindGroupLayoutD
 
     // Create binding layouts
 
-    // Since we now have 2 bindings, we use a vector to store them
-    vector<BindGroupLayoutEntry> bindingLayoutEntries(2, Default);
+    vector<BindGroupLayoutEntry> bindingLayoutEntries(3, Default);
 
     // The uniform buffer binding that we already had
     BindGroupLayoutEntry& bindingLayout = bindingLayoutEntries[0];
@@ -661,6 +713,12 @@ void Application::InitializePipeline(BindGroupLayoutDescriptor* bindGroupLayoutD
     textureBindingLayout.visibility = ShaderStage::Fragment;
     textureBindingLayout.texture.sampleType = TextureSampleType::Float;
     textureBindingLayout.texture.viewDimension = TextureViewDimension::_2D;
+
+    // the sampler binding
+    BindGroupLayoutEntry& samplerBindingLayout = bindingLayoutEntries[2];
+    samplerBindingLayout.binding = 2;
+    samplerBindingLayout.visibility = ShaderStage::Fragment;
+    samplerBindingLayout.sampler.type = SamplerBindingType::Filtering;
 
     bindGroupLayoutDescriptor->label = "Bind Group Layout";
     bindGroupLayoutDescriptor->entryCount = (uint32_t)bindingLayoutEntries.size();
@@ -814,6 +872,7 @@ RequiredLimits Application::GetRequiredLimits(Adapter adapter)
     requiredLimits.limits.maxTextureDimension2D = WINDOW_WIDTH;
     requiredLimits.limits.maxTextureArrayLayers = 1;
     requiredLimits.limits.maxSampledTexturesPerShaderStage = 1;
+    requiredLimits.limits.maxSamplersPerShaderStage = 1;
 
     return requiredLimits;
 }
@@ -908,7 +967,7 @@ bool Application::InitializeBuffers(BindGroupLayout* bindGroupLayout)
     //this->queue.writeBuffer(this->uniformBuffer, this->uniformStride, &uniforms, sizeof(MyUniforms));
 
     // Create a binding
-    vector<BindGroupEntry> bindings(2);
+    vector<BindGroupEntry> bindings(3);
     // The index of the binding (the entries in bindGroupDesc can be in any order)
     bindings[0].binding = 0;
     // The buffer it is actually bound to
@@ -922,6 +981,9 @@ bool Application::InitializeBuffers(BindGroupLayout* bindGroupLayout)
 
     bindings[1].binding = 1;
     bindings[1].textureView = this->colorTextureView;
+
+    bindings[2].binding = 2;
+    bindings[2].sampler = this->sampler;
 
     // A bind group contains one or multiple bindings
     BindGroupDescriptor bindGroupDesc;

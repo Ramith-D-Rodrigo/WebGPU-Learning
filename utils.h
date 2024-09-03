@@ -8,3 +8,4 @@ bool loadGeometry(const fs::path& path, std::vector<float>& pointData, std::vect
 ShaderModule loadShaderModule(const fs::path& path, Device device);
 uint32_t ceilToNextMultiple(uint32_t value, uint32_t step);
 std::vector<uint8_t> createGradientTexture(TextureDescriptor textureDesc);
+std::vector<uint8_t> createAmazingTexture(TextureDescriptor textureDesc);

@@ -110,3 +110,17 @@ std::vector<uint8_t> createGradientTexture(TextureDescriptor textureDesc) {
     
     return pixels;
 }
+
+std::vector<uint8_t> createAmazingTexture(TextureDescriptor textureDesc) {
+    std::vector<uint8_t> pixels(4 * textureDesc.size.width * textureDesc.size.height);
+    for (uint32_t i = 0; i < textureDesc.size.width; ++i) {
+        for (uint32_t j = 0; j < textureDesc.size.height; ++j) {
+            uint8_t* p = &pixels[4 * (j * textureDesc.size.width + i)];
+            p[0] = (i / 16) % 2 == (j / 16) % 2 ? 255 : 0; // r
+            p[1] = ((i - j) / 16) % 2 == 0 ? 255 : 0; // g
+            p[2] = ((i + j) / 16) % 2 == 0 ? 255 : 0; // b
+            p[3] = 255; // a
+        }
+    }
+    return pixels;
+}
