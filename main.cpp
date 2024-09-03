@@ -102,6 +102,8 @@ private:
     TextureView depthTextureView = nullptr;
     Texture colorTexture = nullptr;
     TextureView colorTextureView = nullptr;
+    Texture imageTexture = nullptr;
+    TextureView imageTextureView = nullptr;
     Sampler sampler = nullptr;
 
     mat4x4 S = glm::scale(mat4x4(1.0), vec3(2.0f));
@@ -314,8 +316,17 @@ void Application::Terminate()
     this->depthTexture.release();
 
     // Destroy the color texture
+    this->colorTextureView.release();
     this->colorTexture.destroy();
     this->colorTexture.release();
+
+    // Destroy the image texture
+    this->imageTextureView.release();
+    this->imageTexture.destroy();
+    this->imageTexture.release();
+
+    //release the sampler
+    this->sampler.release();
 
     //release the pipeline
     this->renderPipeline.release();
@@ -629,44 +640,49 @@ void Application::InitializePipeline(BindGroupLayoutDescriptor* bindGroupLayoutD
     source.rowsPerImage = textureDescriptor.size.height;
 
     Extent3D mipLevelSize = textureDescriptor.size;
-    std::vector<uint8_t> previousLevelPixels;
-	for (uint32_t level = 0; level < textureDescriptor.mipLevelCount; ++level) {
-        // Create image data for this mip level
-        vector<uint8_t> pixels(4 * mipLevelSize.width * mipLevelSize.height);
-        for (uint32_t i = 0; i < mipLevelSize.width; ++i) {
-            for (uint32_t j = 0; j < mipLevelSize.height; ++j) {
-                uint8_t* p = &pixels[4 * (j * mipLevelSize.width + i)];
-                if (level == 0) {
-                    p[0] = (i / 16) % 2 == (j / 16) % 2 ? 255 : 0; // r
-                    p[1] = ((i - j) / 16) % 2 == 0 ? 255 : 0; // g
-                    p[2] = ((i + j) / 16) % 2 == 0 ? 255 : 0; // b
-                }
-                else {
-                    // Get the corresponding 4 pixels from the previous level
-                    uint8_t* p00 = &previousLevelPixels[4 * ((2 * j + 0) * (2 * mipLevelSize.width) + (2 * i + 0))];
-                    uint8_t* p01 = &previousLevelPixels[4 * ((2 * j + 0) * (2 * mipLevelSize.width) + (2 * i + 1))];
-                    uint8_t* p10 = &previousLevelPixels[4 * ((2 * j + 1) * (2 * mipLevelSize.width) + (2 * i + 0))];
-                    uint8_t* p11 = &previousLevelPixels[4 * ((2 * j + 1) * (2 * mipLevelSize.width) + (2 * i + 1))];
-                    // Average
-                    p[0] = (p00[0] + p01[0] + p10[0] + p11[0]) / 4;
-                    p[1] = (p00[1] + p01[1] + p10[1] + p11[1]) / 4;
-                    p[2] = (p00[2] + p01[2] + p10[2] + p11[2]) / 4;
-                }
-                p[3] = 255; // a
-            }
-        }
-        destination.mipLevel = level;
+ //   std::vector<uint8_t> previousLevelPixels;
+	//for (uint32_t level = 0; level < textureDescriptor.mipLevelCount; ++level) {
+ //       // Create image data for this mip level
+ //       vector<uint8_t> pixels(4 * mipLevelSize.width * mipLevelSize.height);
+ //       for (uint32_t i = 0; i < mipLevelSize.width; ++i) {
+ //           for (uint32_t j = 0; j < mipLevelSize.height; ++j) {
+ //               uint8_t* p = &pixels[4 * (j * mipLevelSize.width + i)];
+ //               if (level == 0) {
+ //                   p[0] = (i / 16) % 2 == (j / 16) % 2 ? 255 : 0; // r
+ //                   p[1] = ((i - j) / 16) % 2 == 0 ? 255 : 0; // g
+ //                   p[2] = ((i + j) / 16) % 2 == 0 ? 255 : 0; // b
+ //               }
+ //               else {
+ //                   // Get the corresponding 4 pixels from the previous level
+ //                   uint8_t* p00 = &previousLevelPixels[4 * ((2 * j + 0) * (2 * mipLevelSize.width) + (2 * i + 0))];
+ //                   uint8_t* p01 = &previousLevelPixels[4 * ((2 * j + 0) * (2 * mipLevelSize.width) + (2 * i + 1))];
+ //                   uint8_t* p10 = &previousLevelPixels[4 * ((2 * j + 1) * (2 * mipLevelSize.width) + (2 * i + 0))];
+ //                   uint8_t* p11 = &previousLevelPixels[4 * ((2 * j + 1) * (2 * mipLevelSize.width) + (2 * i + 1))];
+ //                   // Average
+ //                   p[0] = (p00[0] + p01[0] + p10[0] + p11[0]) / 4;
+ //                   p[1] = (p00[1] + p01[1] + p10[1] + p11[1]) / 4;
+ //                   p[2] = (p00[2] + p01[2] + p10[2] + p11[2]) / 4;
+ //               }
+ //               p[3] = 255; // a
+ //           }
+ //       }
+ //       destination.mipLevel = level;
 
-        //compute the size of the texture
-        source.bytesPerRow = 4 * mipLevelSize.width;
-        source.rowsPerImage = mipLevelSize.height;
+ //       //compute the size of the texture
+ //       source.bytesPerRow = 4 * mipLevelSize.width;
+ //       source.rowsPerImage = mipLevelSize.height;
 
-        this->queue.writeTexture(destination, pixels.data(), pixels.size(), source, mipLevelSize);
+ //       this->queue.writeTexture(destination, pixels.data(), pixels.size(), source, mipLevelSize);
 
-        //decrease the size for the next mip level
-        mipLevelSize.width /= 2;
-        mipLevelSize.height /= 2;
-        previousLevelPixels = std::move(pixels);
+ //       //decrease the size for the next mip level
+ //       mipLevelSize.width /= 2;
+ //       mipLevelSize.height /= 2;
+ //       previousLevelPixels = std::move(pixels);
+	//}
+    this->imageTexture = loadTexture(RESOURCE_DIR "/image.png", this->device, &this->imageTextureView);
+    if(!this->imageTexture) {
+		cout << "Failed to load the texture" << endl;
+		return;
 	}
 
     //blend pipeline state
@@ -868,8 +884,8 @@ RequiredLimits Application::GetRequiredLimits(Adapter adapter)
     requiredLimits.limits.maxUniformBufferBindingSize = 16 * 4 * sizeof(float);
     //requiredLimits.limits.maxDynamicUniformBuffersPerPipelineLayout = 1; //for now 1
 
-    requiredLimits.limits.maxTextureDimension1D = WINDOW_HEIGHT;
-    requiredLimits.limits.maxTextureDimension2D = WINDOW_WIDTH;
+    requiredLimits.limits.maxTextureDimension1D = 2048;
+    requiredLimits.limits.maxTextureDimension2D = 2048;
     requiredLimits.limits.maxTextureArrayLayers = 1;
     requiredLimits.limits.maxSampledTexturesPerShaderStage = 1;
     requiredLimits.limits.maxSamplersPerShaderStage = 1;
@@ -980,7 +996,7 @@ bool Application::InitializeBuffers(BindGroupLayout* bindGroupLayout)
 
 
     bindings[1].binding = 1;
-    bindings[1].textureView = this->colorTextureView;
+    bindings[1].textureView = this->imageTextureView;
 
     bindings[2].binding = 2;
     bindings[2].sampler = this->sampler;
