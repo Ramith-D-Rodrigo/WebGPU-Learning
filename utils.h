@@ -1,8 +1,10 @@
 #include <filesystem>
 #include <vector>
 #include "stb_image.h"
+#include <webgpu/webgpu.hpp>
 
 namespace fs = std::filesystem;
+
 using namespace wgpu;
 
 bool loadGeometry(const fs::path& path, std::vector<float>& pointData, std::vector<uint16_t>& indexData, int dimensions);

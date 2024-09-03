@@ -22,6 +22,8 @@ add_subdirectory(glfw3webgpu)
 # We specify that we want to create a target of type executable, called "App"
 add_executable(App 
 	main.cpp
+	Application.h
+	Application.cpp
 	utils.h
 	utils.cpp
 	Mesh.cpp
