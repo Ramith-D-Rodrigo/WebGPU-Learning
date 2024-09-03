@@ -67,6 +67,7 @@ struct VertexAttributes {
     vec3 position;
     vec3 normal;
     vec3 color;
+    vec2 uv;
 };
 
 class Application {
@@ -470,7 +471,7 @@ void Application::InitializePipeline(BindGroupLayoutDescriptor* bindGroupLayoutD
     //vertex pipeline state
 
     VertexBufferLayout vertexBufferLayout;
-    vector<VertexAttribute> vertexAttributes(3);
+    vector<VertexAttribute> vertexAttributes(4);
 
     //position attribute
     vertexAttributes[0].shaderLocation = 0; //location in the shader (@location(0))
@@ -486,6 +487,11 @@ void Application::InitializePipeline(BindGroupLayoutDescriptor* bindGroupLayoutD
     vertexAttributes[2].shaderLocation = 2;
     vertexAttributes[2].format = VertexFormat::Float32x3;
     vertexAttributes[2].offset = offsetof(VertexAttributes, color);
+
+    // UV attribute
+    vertexAttributes[3].shaderLocation = 3;
+    vertexAttributes[3].format = VertexFormat::Float32x2;
+    vertexAttributes[3].offset = offsetof(VertexAttributes, uv);
 
     vertexBufferLayout.attributeCount = static_cast<uint32_t>(vertexAttributes.size());
     vertexBufferLayout.attributes = vertexAttributes.data();
@@ -792,13 +798,13 @@ RequiredLimits Application::GetRequiredLimits(Adapter adapter)
     RequiredLimits requiredLimits = Default;
 
     //set the required limits
-    requiredLimits.limits.maxVertexAttributes = 3;
+    requiredLimits.limits.maxVertexAttributes = 4;
     requiredLimits.limits.maxVertexBuffers = 1; //for now 1
     requiredLimits.limits.maxBufferSize = 16 * sizeof(VertexAttributes);
     requiredLimits.limits.maxVertexBufferArrayStride = sizeof(VertexAttributes);
     requiredLimits.limits.minStorageBufferOffsetAlignment = supportedLimits.limits.minStorageBufferOffsetAlignment;
     requiredLimits.limits.minUniformBufferOffsetAlignment = supportedLimits.limits.minUniformBufferOffsetAlignment;
-    requiredLimits.limits.maxInterStageShaderComponents = 6; //3 for vertex and 3 for fragment (both normal and color)
+    requiredLimits.limits.maxInterStageShaderComponents = 8; //3 for vertex and 3 for fragment (both normal and color)
     requiredLimits.limits.maxBindGroups = 1; //for now 1
     requiredLimits.limits.maxUniformBuffersPerShaderStage = 1; //for now 1
     requiredLimits.limits.maxUniformBufferBindingSize = 16 * 4 * sizeof(float);
@@ -827,7 +833,7 @@ bool Application::InitializeBuffers(BindGroupLayout* bindGroupLayout)
 		//return false;
   //  }
 
-    bool status = loadGeometry(RESOURCE_DIR "/pyramid.txt", pointData, indexData, 6);
+    bool status = loadGeometry(RESOURCE_DIR "/pyramid.txt", pointData, indexData, 8);
     if (!status) {
         cout<<"Failed to load the geometry"<<endl;
 		return false;
