@@ -94,3 +94,19 @@ uint32_t ceilToNextMultiple(uint32_t value, uint32_t step) {
     uint32_t divide_and_ceil = value / step + (value % step == 0 ? 0 : 1);
     return step * divide_and_ceil;
 }
+
+std::vector<uint8_t> createGradientTexture(TextureDescriptor textureDesc) {
+    // Create image data
+    std::vector<uint8_t> pixels(4 * textureDesc.size.width * textureDesc.size.height);
+    for (uint32_t i = 0; i < textureDesc.size.width; ++i) {
+        for (uint32_t j = 0; j < textureDesc.size.height; ++j) {
+            uint8_t* p = &pixels[4 * (j * textureDesc.size.width + i)];
+            p[0] = (uint8_t)i; // r
+            p[1] = (uint8_t)j; // g
+            p[2] = 128; // b
+            p[3] = 255; // a
+        }
+    }
+    
+    return pixels;
+}

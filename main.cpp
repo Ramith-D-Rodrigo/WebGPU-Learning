@@ -1,5 +1,6 @@
 // Include the C++ wrapper instead of the raw header(s)
 #define WEBGPU_CPP_IMPLEMENTATION
+
 #include <webgpu/webgpu.hpp>
 
 #include <GLFW/glfw3.h>
@@ -18,13 +19,16 @@
 #include <glm/ext.hpp>
 
 #include "utils.h"
+//#include "build/SceneObject.h"
+//#include "build/Model.h"
 
-#define WINDOW_WIDTH 800
-#define WINDOW_HEIGHT 600
+#define WINDOW_WIDTH 1280
+#define WINDOW_HEIGHT 720
 
 using namespace wgpu;
 using namespace std;
 using namespace glm;
+
 
 // We define a function that hides implementation-specific variants of device polling:
 static void wgpuPollEvents([[maybe_unused]] Device device, [[maybe_unused]] bool yieldToWebBrowser) {
@@ -55,6 +59,16 @@ MyUniforms uniforms = {};
 vec4 colorOne = { 0.0f, 1.0f, 0.4f, 1.0f };
 vec4 colorTwo = { 1.0f, 1.0f, 1.0f, 0.7f };
 
+/**
+ * A structure that describes the data layout in the vertex buffer
+ * We do not instantiate it but use it in `sizeof` and `offsetof`
+ */
+struct VertexAttributes {
+    vec3 position;
+    vec3 normal;
+    vec3 color;
+};
+
 class Application {
 public:
     bool Initialize();	// Initialize the application and return true if successful
@@ -68,7 +82,7 @@ private:
         BindGroupLayout* bindGroupLayout);	// Initialize the pipeline
     void PlayWithBuffers();	// Play with buffers
     RequiredLimits GetRequiredLimits(Adapter adapter);	// Get the required limits
-    bool InitializeBuffers(BindGroupLayoutDescriptor* bindGroupLayoutDescriptor, BindGroupLayout* bindGroupLayout);
+    bool InitializeBuffers(BindGroupLayout* bindGroupLayout);
 
 private:
     GLFWwindow* window = nullptr;
@@ -85,6 +99,8 @@ private:
     uint32_t uniformStride = 0;
     Texture depthTexture = nullptr;
     TextureView depthTextureView = nullptr;
+    Texture colorTexture = nullptr;
+    TextureView colorTextureView = nullptr;
 
     mat4x4 S = glm::scale(mat4x4(1.0), vec3(2.0f));
     mat4x4 T1 = glm::translate(mat4x4(1.0), vec3(0.5, 0.0, 0.0));
@@ -276,7 +292,7 @@ bool Application::Initialize()
 
     //Experimenting with the buffers
     //this->PlayWithBuffers();
-    if (!this->InitializeBuffers(&bindGroupLayoutDescriptor, &bindGroupLayout)) {
+    if (!this->InitializeBuffers(&bindGroupLayout)) {
         return false;
     }
 
@@ -294,6 +310,10 @@ void Application::Terminate()
     this->depthTextureView.release();
     this->depthTexture.destroy();
     this->depthTexture.release();
+
+    // Destroy the color texture
+    this->colorTexture.destroy();
+    this->colorTexture.release();
 
     //release the pipeline
     this->renderPipeline.release();
@@ -335,7 +355,7 @@ void Application::MainLoop()
     float angle = uniforms.time;
     R1 = glm::rotate(mat4x4(1.0), angle, vec3(0.0, 0.0, 1.0));
     uniforms.modelMatrix = R1 * T1 * S;
-    queue.writeBuffer(uniformBuffer, offsetof(MyUniforms, modelMatrix), &uniforms.modelMatrix, sizeof(MyUniforms::modelMatrix));
+    this->queue.writeBuffer(uniformBuffer, offsetof(MyUniforms, modelMatrix), &uniforms.modelMatrix, sizeof(MyUniforms::modelMatrix));
 
     CommandEncoderDescriptor commandEncoderDescriptor = {};
     commandEncoderDescriptor.nextInChain = nullptr;
@@ -450,20 +470,27 @@ void Application::InitializePipeline(BindGroupLayoutDescriptor* bindGroupLayoutD
     //vertex pipeline state
 
     VertexBufferLayout vertexBufferLayout;
-    vector<VertexAttribute> vertexAttributes(2);
+    vector<VertexAttribute> vertexAttributes(3);
 
-    vertexAttributes[0].format = VertexFormat::Float32x3; //XYZ position (3D)
-    vertexAttributes[0].offset = 0;
+    //position attribute
     vertexAttributes[0].shaderLocation = 0; //location in the shader (@location(0))
+    vertexAttributes[0].format = VertexFormat::Float32x3; //XYZ position (3D)
+    vertexAttributes[0].offset = offsetof(VertexAttributes, position); //offset in the vertex buffer
 
-    vertexAttributes[1].format = VertexFormat::Float32x3; //RGB color
-    vertexAttributes[1].offset = 3 * sizeof(float); //3 floats for the position
-    vertexAttributes[1].shaderLocation = 1; //location in the shader (@location(1))
+    //normal attribute
+    vertexAttributes[1].shaderLocation = 1;
+    vertexAttributes[1].format = VertexFormat::Float32x3;
+    vertexAttributes[1].offset = offsetof(VertexAttributes, normal);
+
+    //color attribute
+    vertexAttributes[2].shaderLocation = 2;
+    vertexAttributes[2].format = VertexFormat::Float32x3;
+    vertexAttributes[2].offset = offsetof(VertexAttributes, color);
 
     vertexBufferLayout.attributeCount = static_cast<uint32_t>(vertexAttributes.size());
     vertexBufferLayout.attributes = vertexAttributes.data();
     vertexBufferLayout.stepMode = VertexStepMode::Vertex; //each vertex is a separate entity (not instanced)
-    vertexBufferLayout.arrayStride = 6 * sizeof(float); //6 consecutive floats (x,y,z,r,g,b)
+    vertexBufferLayout.arrayStride = sizeof(VertexAttributes);
 
     renderPipelineDescriptor.vertex.bufferCount = 1;
     renderPipelineDescriptor.vertex.buffers = &vertexBufferLayout;
@@ -540,6 +567,49 @@ void Application::InitializePipeline(BindGroupLayoutDescriptor* bindGroupLayoutD
 
     this->depthTextureView = this->depthTexture.createView(depthTextureViewDescriptor);
 
+
+    //Create color texture
+    TextureDescriptor textureDescriptor = {};
+    textureDescriptor.dimension = TextureDimension::_2D;
+    textureDescriptor.format = TextureFormat::RGBA8Unorm;
+    textureDescriptor.mipLevelCount = 1;
+    textureDescriptor.sampleCount = 1;
+    textureDescriptor.size = { WINDOW_WIDTH, WINDOW_HEIGHT, 1 };
+    textureDescriptor.usage = TextureUsage::TextureBinding | TextureUsage::CopyDst; //copy is needed to copy pixel data from c++ code
+    //texture binding is needed to bind the texture to the shader
+    textureDescriptor.viewFormatCount = 0;
+    textureDescriptor.viewFormats = nullptr;
+
+    this->colorTexture = this->device.createTexture(textureDescriptor);
+
+    TextureViewDescriptor textureViewDesc;
+    textureViewDesc.aspect = TextureAspect::All;
+    textureViewDesc.baseArrayLayer = 0;
+    textureViewDesc.arrayLayerCount = 1;
+    textureViewDesc.baseMipLevel = 0;
+    textureViewDesc.mipLevelCount = 1;
+    textureViewDesc.dimension = TextureViewDimension::_2D;
+    textureViewDesc.format = textureDescriptor.format;
+    this->colorTextureView = this->colorTexture.createView(textureViewDesc);
+
+    vector<uint8_t> pixels = createGradientTexture(textureDescriptor);
+
+    // Arguments telling which part of the texture we upload to
+    // (together with the last argument of writeTexture)
+    ImageCopyTexture destination;
+    destination.texture = this->colorTexture;
+    destination.mipLevel = 0;
+    destination.origin = { 0, 0, 0 };   //equivalent to offset arg in write buffer
+    destination.aspect = TextureAspect::All;    //this only relevant for depth textures
+
+    // Arguments telling how the C++ side pixel memory is laid out
+    TextureDataLayout source;
+    source.offset = 0;
+    source.bytesPerRow = 4 * textureDescriptor.size.width;
+    source.rowsPerImage = textureDescriptor.size.height;
+
+    queue.writeTexture(destination, pixels.data(), pixels.size(), source, textureDescriptor.size);
+
     //blend pipeline state
     BlendState blendState = {};
 
@@ -566,18 +636,29 @@ void Application::InitializePipeline(BindGroupLayoutDescriptor* bindGroupLayoutD
     renderPipelineDescriptor.multisample.mask = ~0u; //all bits are enabled
     renderPipelineDescriptor.multisample.alphaToCoverageEnabled = false;
 
+    // Create binding layouts
 
-    //create the binding layout
-    BindGroupLayoutEntry bindGroupLayoutEntry = Default;
-    bindGroupLayoutEntry.binding = 0;   //index as used in the @binding attribute in the shader
-    bindGroupLayoutEntry.visibility = ShaderStage::Vertex | ShaderStage::Fragment; //both vertex and fragment shaders
-    bindGroupLayoutEntry.buffer.type = BufferBindingType::Uniform;
-    bindGroupLayoutEntry.buffer.minBindingSize = sizeof(MyUniforms);
-    //bindGroupLayoutEntry.buffer.hasDynamicOffset = true; 
+    // Since we now have 2 bindings, we use a vector to store them
+    vector<BindGroupLayoutEntry> bindingLayoutEntries(2, Default);
+
+    // The uniform buffer binding that we already had
+    BindGroupLayoutEntry& bindingLayout = bindingLayoutEntries[0];
+    bindingLayout.binding = 0;//index as used in the @binding attribute in the shader
+    bindingLayout.visibility = ShaderStage::Vertex | ShaderStage::Fragment;//both vertex and fragment shaders
+    bindingLayout.buffer.type = BufferBindingType::Uniform;
+    bindingLayout.buffer.minBindingSize = sizeof(MyUniforms);
+
+    // The texture binding
+    BindGroupLayoutEntry& textureBindingLayout = bindingLayoutEntries[1];
+    // Setup texture binding
+    textureBindingLayout.binding = 1;
+    textureBindingLayout.visibility = ShaderStage::Fragment;
+    textureBindingLayout.texture.sampleType = TextureSampleType::Float;
+    textureBindingLayout.texture.viewDimension = TextureViewDimension::_2D;
 
     bindGroupLayoutDescriptor->label = "Bind Group Layout";
-    bindGroupLayoutDescriptor->entryCount = 1;
-    bindGroupLayoutDescriptor->entries = &bindGroupLayoutEntry;
+    bindGroupLayoutDescriptor->entryCount = (uint32_t)bindingLayoutEntries.size();
+    bindGroupLayoutDescriptor->entries = bindingLayoutEntries.data();
 
     *bindGroupLayout = this->device.createBindGroupLayout(*bindGroupLayoutDescriptor);
 
@@ -711,13 +792,13 @@ RequiredLimits Application::GetRequiredLimits(Adapter adapter)
     RequiredLimits requiredLimits = Default;
 
     //set the required limits
-    requiredLimits.limits.maxVertexAttributes = 2;
+    requiredLimits.limits.maxVertexAttributes = 3;
     requiredLimits.limits.maxVertexBuffers = 1; //for now 1
-    requiredLimits.limits.maxBufferSize = 15 * 5 * sizeof(float); //6 vertices, 5 floats per vertex
-    requiredLimits.limits.maxVertexBufferArrayStride = 6 * sizeof(float); //6 floats per vertex
+    requiredLimits.limits.maxBufferSize = 16 * sizeof(VertexAttributes);
+    requiredLimits.limits.maxVertexBufferArrayStride = sizeof(VertexAttributes);
     requiredLimits.limits.minStorageBufferOffsetAlignment = supportedLimits.limits.minStorageBufferOffsetAlignment;
     requiredLimits.limits.minUniformBufferOffsetAlignment = supportedLimits.limits.minUniformBufferOffsetAlignment;
-    requiredLimits.limits.maxInterStageShaderComponents = 3; //3 floats forwarded from the vertex shader to the fragment shader
+    requiredLimits.limits.maxInterStageShaderComponents = 6; //3 for vertex and 3 for fragment (both normal and color)
     requiredLimits.limits.maxBindGroups = 1; //for now 1
     requiredLimits.limits.maxUniformBuffersPerShaderStage = 1; //for now 1
     requiredLimits.limits.maxUniformBufferBindingSize = 16 * 4 * sizeof(float);
@@ -726,11 +807,12 @@ RequiredLimits Application::GetRequiredLimits(Adapter adapter)
     requiredLimits.limits.maxTextureDimension1D = WINDOW_HEIGHT;
     requiredLimits.limits.maxTextureDimension2D = WINDOW_WIDTH;
     requiredLimits.limits.maxTextureArrayLayers = 1;
+    requiredLimits.limits.maxSampledTexturesPerShaderStage = 1;
 
     return requiredLimits;
 }
 
-bool Application::InitializeBuffers(BindGroupLayoutDescriptor* bindGroupLayoutDescriptor, BindGroupLayout* bindGroupLayout)
+bool Application::InitializeBuffers(BindGroupLayout* bindGroupLayout)
 {
     // Define point data
     // The de-duplicated list of point positions
@@ -739,11 +821,17 @@ bool Application::InitializeBuffers(BindGroupLayoutDescriptor* bindGroupLayoutDe
     // This is a list of indices referencing positions in the pointData
     vector<uint16_t> indexData;
 
-    bool success = loadGeometry(RESOURCE_DIR "/pyramid.txt", pointData, indexData, 3);
-    if (!success) {
-		cerr << "Failed to load geometry" << endl;
-        return false;
-	}
+  //  SceneObject* object = Model::LoadModel("D:\\Uni\\3D Models\\models\\base_sponza\\NewSponza_Main_glTF_003.gltf");
+  //  if (!object) {
+  //      cout<<"Failed to load the model"<<endl;
+		//return false;
+  //  }
+
+    bool status = loadGeometry(RESOURCE_DIR "/pyramid.txt", pointData, indexData, 6);
+    if (!status) {
+        cout<<"Failed to load the geometry"<<endl;
+		return false;
+    }
 
     this->indexCount = static_cast<uint32_t>(indexData.size());
 
@@ -755,6 +843,9 @@ bool Application::InitializeBuffers(BindGroupLayoutDescriptor* bindGroupLayoutDe
     this->pointBuffer = this->device.createBuffer(bufferDescriptor);
 
     this->queue.writeBuffer(this->pointBuffer, 0, pointData.data(), bufferDescriptor.size);
+
+    ////create the normal buffer
+    //bufferDescriptor.label = "Normal Buffer";
 
     //create the index buffer
     bufferDescriptor.label = "Index Buffer";
@@ -784,7 +875,7 @@ bool Application::InitializeBuffers(BindGroupLayoutDescriptor* bindGroupLayoutDe
     float angle2 = 3.0f * PI / 4.0;
     vec3 focalPoint(0.0, 0.0, -2.0);
 
-    this->S = glm::scale(mat4x4(1.0), vec3(0.5f));
+    this->S = glm::scale(mat4x4(1.0), vec3(1.2f));
     this->T1 = glm::translate(mat4x4(1.0), vec3(0.5, 0.0, 0.0));
     this->R1 = glm::rotate(mat4x4(1.0), angle1, vec3(0.0, 0.0, 1.0));
     uniforms.modelMatrix = R1 * T1 * S;
@@ -796,10 +887,10 @@ bool Application::InitializeBuffers(BindGroupLayoutDescriptor* bindGroupLayoutDe
     // Set the projection matrix
     float ratio = WINDOW_WIDTH / WINDOW_HEIGHT;
     float focalLength = 2.0;
-    float near = 0.01f;
-    float far = 100.0f;
+    float nearView = 0.01f;
+    float farView = 100.0f;
     float fov = 2 * glm::atan(1 / focalLength);
-    uniforms.projectionMatrix = glm::perspective(fov, ratio, near, far);
+    uniforms.projectionMatrix = glm::perspective(fov, ratio, nearView, farView);
 
 
     uniforms.time = 1.0f;
@@ -811,23 +902,27 @@ bool Application::InitializeBuffers(BindGroupLayoutDescriptor* bindGroupLayoutDe
     //this->queue.writeBuffer(this->uniformBuffer, this->uniformStride, &uniforms, sizeof(MyUniforms));
 
     // Create a binding
-    BindGroupEntry binding;
+    vector<BindGroupEntry> bindings(2);
     // The index of the binding (the entries in bindGroupDesc can be in any order)
-    binding.binding = 0;
+    bindings[0].binding = 0;
     // The buffer it is actually bound to
-    binding.buffer = this->uniformBuffer;
+    bindings[0].buffer = this->uniformBuffer;
     // We can specify an offset within the buffer, so that a single buffer can hold
     // multiple uniform blocks.
-    binding.offset = 0;
+    bindings[0].offset = 0;
     // And we specify again the size of the buffer.
-    binding.size = sizeof(MyUniforms);
+    bindings[0].size = sizeof(MyUniforms);
+
+
+    bindings[1].binding = 1;
+    bindings[1].textureView = this->colorTextureView;
 
     // A bind group contains one or multiple bindings
     BindGroupDescriptor bindGroupDesc;
     bindGroupDesc.layout = *bindGroupLayout;
     // There must be as many bindings as declared in the layout!
-    bindGroupDesc.entryCount = bindGroupLayoutDescriptor->entryCount;
-    bindGroupDesc.entries = &binding;
+    bindGroupDesc.entryCount = (uint32_t) bindings.size();
+    bindGroupDesc.entries = bindings.data();
     this->bindGroup = device.createBindGroup(bindGroupDesc);
 
     cout<<"Buffers initialized successfully"<<endl;

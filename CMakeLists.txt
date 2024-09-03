@@ -24,6 +24,12 @@ add_executable(App
 	main.cpp
 	utils.h
 	utils.cpp
+	Mesh.cpp
+	Mesh.h
+	Model.h
+	Model.cpp
+	SceneObject.cpp
+	SceneObject.h
 )
 
 target_link_libraries(App PRIVATE glfw webgpu glfw3webgpu)

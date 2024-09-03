@@ -8,11 +8,13 @@ struct MyUniforms {
 
 
 @group(0) @binding(0) var<uniform> uMyUniforms: MyUniforms;
+@group(0) @binding(1) var gradientTexture: texture_2d<f32>;
 
 struct VertexInput {
     @location(0) position: vec3f,
-    @location(1) color: vec3f,
-}
+    @location(1) normal: vec3f, // new attribute
+    @location(2) color: vec3f,
+};
 
 struct VertexOutput {
     @builtin(position) position: vec4f,
@@ -21,6 +23,7 @@ struct VertexOutput {
     // (It can also refer to another field of another struct that would be used
     // as input to the fragment shader.)
     @location(0) color: vec3f,
+    @location(1) normal: vec3f,
 }
 
 @vertex
@@ -28,11 +31,14 @@ fn vs_main(in: VertexInput) -> VertexOutput {
 	var out: VertexOutput;
 	out.position = uMyUniforms.projectionMatrix * uMyUniforms.viewMatrix * uMyUniforms.modelMatrix * vec4f(in.position, 1.0f);	
 	out.color = in.color;
+    	out.normal = in.normal;
 	return out;
 }
 
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4f {
-    let color = in.color * uMyUniforms.color.rgb;
+    let lightDirection = vec3f(0.5, -0.9, 0.1);
+    let shading = dot(lightDirection, in.normal);
+    let color = textureLoad(gradientTexture, vec2i(in.position.xy), 0).rgb * shading;
     return vec4f(color, uMyUniforms.color.a);
 }
