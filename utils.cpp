@@ -143,7 +143,6 @@ Texture loadTexture(const fs::path& path, Device device, TextureView* pTextureVi
     textureDesc.viewFormats = nullptr;
     Texture texture = device.createTexture(textureDesc);
 
-    // Upload data to the GPU texture (to be implemented!)
     writeMipMaps(device, texture, textureDesc.size, textureDesc.mipLevelCount, pixelData);
 
     stbi_image_free(pixelData);
@@ -164,13 +163,11 @@ Texture loadTexture(const fs::path& path, Device device, TextureView* pTextureVi
 }
 
 // Auxiliary function for loadTexture
-static void writeMipMaps(
-    Device device,
-    Texture texture,
-    Extent3D textureSize,
-    uint32_t mipLevelCount, // not used yet
-    const unsigned char* pixelData)
+static void writeMipMaps(Device device, Texture texture, Extent3D textureSize, uint32_t mipLevelCount, const unsigned char* pixelData)
 {
+    //TODO: 
+    //1) make mip level count so that it creates 1x1 dimension texture
+    //2) use compute shader for this
     Queue queue = device.getQueue();
 
     // Arguments telling which part of the texture we upload to

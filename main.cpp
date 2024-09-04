@@ -2,8 +2,6 @@
 #define WEBGPU_CPP_IMPLEMENTATION
 
 #include "utils.h"
-//#include "build/SceneObject.h"
-//#include "build/Model.h"
 #include "Application.h"
 
 #define WINDOW_WIDTH 1280

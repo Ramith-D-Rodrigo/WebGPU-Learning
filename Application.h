@@ -10,6 +10,9 @@
 #include <glm/ext.hpp>
 
 #include "utils.h"
+#include "SceneObject.h"
+#include "Model.h"
+#include "Mesh.h"
 
 #ifdef __EMSCRIPTEN__
 #  include <emscripten.h>
@@ -19,16 +22,12 @@ using namespace std;
 using namespace wgpu;
 using namespace glm;
 
-struct MyUniforms {
+struct CameraUniform {
     mat4x4 projectionMatrix;
     mat4x4 viewMatrix;
-    mat4x4 modelMatrix;
-    vec4 color;
-    float time;
-    float padding[3]; // padding to make the size of the struct a multiple of 16 bytes
 };
 
-static_assert(sizeof(MyUniforms) % 16 == 0, "MyUniforms size must be a multiple of 16 bytes");
+static_assert(sizeof(CameraUniform) % 16 == 0, "MyUniforms size must be a multiple of 16 bytes");
 
 class Application {
 public:
@@ -40,7 +39,6 @@ public:
 private:
     void wgpuPollEvents(bool yieldToWebBrowser);	// Poll events
     TextureView GetNextSurfaceTextureView();	// Get the next surface texture view
-    void PlayWithBuffers();	// Play with buffers
     RequiredLimits GetRequiredLimits(Adapter adapter);	// Get the required limits
 
     bool initWindowAndDevice(uint16 windowWidth, uint16 windowHeight);
@@ -52,17 +50,19 @@ private:
     bool initRenderPipeline();
     void terminateRenderPipeline();
 
+    bool initTextureSampler();
+    void terminateTextureSampler();
+
     bool initTexture();
     void terminateTexture();
 
-    bool initGeometry();
-    void terminateGeometry();
+    bool initScene();
+    void terminateScene();
 
     bool initUniforms();
     void terminateUniforms();
 
-    bool initBindingGroup();
-    void terminateBindingGroup();
+    void renderScene(RenderPassEncoder renderPass, mat4* parentModelMatrix, SceneObject* renderingObject);
 
 private:
     std::unique_ptr<wgpu::ErrorCallback> onDeviceError = nullptr;
@@ -83,27 +83,27 @@ private:
     TextureView depthTextureView = nullptr;
 
     //render pipeline variables
-    BindGroupLayout bindGroupLayout = nullptr;
     RenderPipeline renderPipeline = nullptr;
     ShaderModule shaderModule = nullptr;
+    BindGroupLayout cameraBindGroupLayout = nullptr;
+    BindGroupLayout modelMatrixBindGroupLayout = nullptr;
+    BindGroupLayout textureBindGroupLayout = nullptr;
 
     //texture variables
     Sampler sampler = nullptr;
     Texture imageTexture = nullptr;
     TextureView imageTextureView = nullptr;
 
-    //geometry variables
-    Buffer pointBuffer = nullptr;
-    Buffer indexBuffer = nullptr;
-    uint32_t indexCount = 0;
+    SceneObject* scene = nullptr;
 
     //uniforms variables
-    MyUniforms uniforms;
-    Buffer uniformBuffer = nullptr;
-    uint32_t uniformStride = 0;
+    CameraUniform cameraUniform;
+    Buffer cameraUniformBuffer = nullptr;
+    uint32_t cameraUniformStride = 0;
 
     //binding group variables
     BindGroup bindGroup = nullptr;
+    BindGroup cameraBindGroup = nullptr;
 
     //main loop variables
     mat4x4 S = glm::scale(mat4x4(1.0), vec3(2.0f));
