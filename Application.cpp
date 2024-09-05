@@ -374,7 +374,7 @@ bool Application::initRenderPipeline()
 
     renderPipelineDescriptor.vertex.bufferCount = vertexBufferLayouts.size();
     renderPipelineDescriptor.vertex.buffers = vertexBufferLayouts.data();
-    renderPipelineDescriptor.vertex.module = shaderModule;
+    renderPipelineDescriptor.vertex.module = this->shaderModule;
     renderPipelineDescriptor.vertex.entryPoint = "vs_main"; //vertex shader main
     renderPipelineDescriptor.vertex.constantCount = 0;
     renderPipelineDescriptor.vertex.constants = nullptr;
@@ -402,7 +402,7 @@ bool Application::initRenderPipeline()
 
     //fragment pipeline state (this is optional)
     FragmentState fragmentState = {};
-    fragmentState.module = shaderModule;
+    fragmentState.module = this->shaderModule;
     fragmentState.entryPoint = "fs_main"; //fragment shader main
     fragmentState.constantCount = 0;
     fragmentState.constants = nullptr;
