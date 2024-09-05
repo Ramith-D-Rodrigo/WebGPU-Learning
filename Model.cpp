@@ -133,17 +133,24 @@ Mesh* Model::processPrimitive(const tinygltf::Primitive& primitive, const tinygl
     size_t uvCount = 0;
     extractBufferData("TEXCOORD_0", 2, uvs, uvCount);
 
-    const uint32_t* indices = nullptr;
+    const unsigned char* indices = nullptr;
+    wgpu::IndexFormat indexFormat = wgpu::IndexFormat::Uint16;
     size_t indexCount = 0;
     if (primitive.indices >= 0) {
         const auto& accessor = model.accessors[primitive.indices];
         const auto& bufferView = model.bufferViews[accessor.bufferView];
         const auto& buffer = model.buffers[bufferView.buffer];
-        indices = reinterpret_cast<const uint32_t*>(&buffer.data[bufferView.byteOffset + accessor.byteOffset]);
+        if (accessor.componentType == TINYGLTF_COMPONENT_TYPE_SHORT) {
+            indexFormat = wgpu::IndexFormat::Uint16;
+        }
+        else if (accessor.componentType == TINYGLTF_COMPONENT_TYPE_INT) {
+            indexFormat = wgpu::IndexFormat::Uint32;
+        }
+        indices = &buffer.data[bufferView.byteOffset + accessor.byteOffset];
         indexCount = accessor.count;
     }
 
     std::cout << "creating mesh\n";
-    return new Mesh(vertices, vertexCount, indices, indexCount, normals, normalCount, uvs, uvCount,
+    return new Mesh(vertices, vertexCount, indices, indexCount, indexFormat, normals, normalCount, uvs, uvCount,
         Model::textureView, Model::textureBindGroupLayout, Model::device, Model::sampler);
 }

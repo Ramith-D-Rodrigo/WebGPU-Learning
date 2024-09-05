@@ -662,7 +662,7 @@ void Application::renderScene(RenderPassEncoder renderPass, mat4* parentModelMat
         renderPass.setVertexBuffer(2, uvBuffer, 0, uvBuffer.getSize());
 
         //uint must correspond to the index buffer data type
-        renderPass.setIndexBuffer(indexBuffer, IndexFormat::Uint32, 0, indexBuffer.getSize());
+        renderPass.setIndexBuffer(indexBuffer, meshes[i]->getIndexFormat(), 0, indexBuffer.getSize());
 
         renderPass.setBindGroup(0, this->cameraBindGroup, 0, nullptr);
         renderPass.setBindGroup(1, renderingObject->getModelBindGroup(), 0, nullptr);

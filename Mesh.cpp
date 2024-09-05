@@ -6,7 +6,7 @@ using namespace std;
 using namespace wgpu;
 
 Mesh::Mesh(const float* vertices, size_t numVertices, 
-	const uint32_t* indices, size_t numIndices, 
+	const unsigned char* indices, size_t numIndices, IndexFormat indexFormat,
 	const float* normals, size_t numNormals,
 	const float* uvs, size_t numUvs,
 	TextureView textureView, BindGroupLayout textureBindGroupLayout, Device device, Sampler sampler)
@@ -15,6 +15,7 @@ Mesh::Mesh(const float* vertices, size_t numVertices,
 	this->numVertices = numVertices;
 	this->indices = indices;
 	this->numIndices = numIndices;
+	this->indexFormat = indexFormat;
 	this->normals = normals;
 	this->numNormals = numNormals;
 	this->uvs = uvs;
@@ -67,7 +68,7 @@ size_t Mesh::getNumVertices()
 	return numVertices;
 }
 
-const uint32_t* Mesh::getIndices()
+const unsigned char* Mesh::getIndices()
 {
 	return indices;
 }
@@ -75,6 +76,11 @@ const uint32_t* Mesh::getIndices()
 size_t Mesh::getNumIndices()
 {
 	return numIndices;
+}
+
+IndexFormat Mesh::getIndexFormat()
+{
+	return indexFormat;
 }
 
 const float* Mesh::getNormals()
@@ -122,7 +128,13 @@ void Mesh::setBuffers(Device device, Queue queue)
 
     //create the index buffer
     bufferDescriptor.label = "Index Buffer";
-    bufferDescriptor.size = numIndices * sizeof(uint32_t);
+	if (this->indexFormat == IndexFormat::Uint16) {
+		bufferDescriptor.size = numIndices * sizeof(uint16_t);
+	}
+	else if(this->indexFormat == IndexFormat::Uint32) {
+		bufferDescriptor.size = numIndices * sizeof(uint32_t);
+	}
+	bufferDescriptor.size = (bufferDescriptor.size + 3) & ~3; // round up to the next multiple of 4
     bufferDescriptor.usage = BufferUsage::Index | BufferUsage::CopyDst; //must add index usage
     this->indexBuffer = device.createBuffer(bufferDescriptor);
 

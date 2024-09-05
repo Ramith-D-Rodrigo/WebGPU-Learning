@@ -10,8 +10,9 @@ class Mesh
 private:
 	const float* vertices;
 	size_t numVertices;
-	const uint32_t* indices;
+	const unsigned char* indices;
 	size_t numIndices;
+	IndexFormat indexFormat = IndexFormat::Uint16;
 	const float* normals;
 	size_t numNormals;
 	const float* uvs;
@@ -25,7 +26,7 @@ private:
 
 public:
 	Mesh(const float* vertices, size_t numVertices, 
-		const uint32_t* indices, size_t numIndices, 
+		const unsigned char* indices, size_t numIndices, IndexFormat indexFormat,
 		const float* normals, size_t numNormals, 
 		const float* uvs, size_t numUvs,
 		TextureView textureView, BindGroupLayout textureBindGroupLayout, Device device, Sampler sampler);
@@ -33,8 +34,9 @@ public:
 
 	const float* getVertices();
 	size_t getNumVertices();
-	const uint32_t* getIndices();
+	const unsigned char* getIndices();
 	size_t getNumIndices();
+	IndexFormat getIndexFormat();
 	const float* getNormals();
 	size_t getNumNormals();
 	const float* getUVs();
